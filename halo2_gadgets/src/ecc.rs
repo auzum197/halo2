@@ -80,6 +80,14 @@ pub trait EccInstructions<C: CurveAffine>:
         value: Value<C>,
     ) -> Result<Self::NonIdentityPoint, Error>;
 
+    /// Witnesses the given constant point with both coordinates pinned via fixed columns.
+    /// Returns an error if the point is the identity.
+    fn witness_point_non_id_from_constant(
+        &self,
+        layouter: &mut impl Layouter<C::Base>,
+        value: C,
+    ) -> Result<Self::NonIdentityPoint, Error>;
+
     /// Witnesses a full-width scalar to be used in variable-base multiplication.
     fn witness_scalar_var(
         &self,
@@ -283,13 +291,24 @@ pub struct NonIdentityPoint<C: CurveAffine, EccChip: EccInstructions<C>> {
 }
 
 impl<C: CurveAffine, EccChip: EccInstructions<C>> NonIdentityPoint<C, EccChip> {
-    /// Constructs a new point with the given value.
+    /// Witnesses the given point with only on-curve / non-identity constraints.
+    /// For known-constant points use [`NonIdentityPoint::new_from_constant`].
     pub fn new(
         chip: EccChip,
         mut layouter: impl Layouter<C::Base>,
         value: Value<C>,
     ) -> Result<Self, Error> {
         let point = chip.witness_point_non_id(&mut layouter, value);
+        point.map(|inner| NonIdentityPoint { chip, inner })
+    }
+
+    /// Witnesses the given constant point with both coordinates pinned via fixed columns.
+    pub fn new_from_constant(
+        chip: EccChip,
+        mut layouter: impl Layouter<C::Base>,
+        value: C,
+    ) -> Result<Self, Error> {
+        let point = chip.witness_point_non_id_from_constant(&mut layouter, value);
         point.map(|inner| NonIdentityPoint { chip, inner })
     }
 
