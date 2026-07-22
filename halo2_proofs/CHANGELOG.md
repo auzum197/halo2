@@ -13,6 +13,9 @@ and this project adheres to Rust's notion of
   challenges are public.
 - Apple AArch64 builds now enable the vendored Pasta assembly field backend.
 - Zero-padded FFTs now skip stages that only combine known-zero coefficients.
+- `halo2_proofs::plonk::verify_proof` now computes instance commitments
+  directly from their supplied Lagrange coefficients, without zero-padding to
+  the evaluation domain.
 - MSRV is now 1.88.
 
 ## [0.3.5] - 2026-08-02
