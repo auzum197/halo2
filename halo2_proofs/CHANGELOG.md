@@ -11,6 +11,7 @@ and this project adheres to Rust's notion of
 - The IPA prover now batches the scalar multiplications used to collapse its
   generator vector, using GLV for Pasta curves because the Fiat-Shamir
   challenges are public.
+- Apple AArch64 builds now enable the vendored Pasta assembly field backend.
 - Zero-padded FFTs now skip stages that only combine known-zero coefficients.
 - MSRV is now 1.88.
 
