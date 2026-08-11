@@ -14,6 +14,9 @@ and this project adheres to Rust's notion of
   - `EccInstructions::witness_point_non_id_from_constant`
   - `NonIdentityPoint::new_from_constant`
 
+### Changed
+- MSRV is now 1.88.
+
 ## [0.5.0] - 2026-06-02
 
 ### Added
