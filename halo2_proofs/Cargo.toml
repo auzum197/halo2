@@ -152,6 +152,7 @@ version = "0.13"
 version = "0.13"
 
 [dependencies.halo2_legacy_pdqsort]
+path = "../halo2_legacy_pdqsort"
 version = "0.1.0"
 optional = true
 
@@ -163,6 +164,7 @@ version = "0.1.0"
 default-features = false
 
 [dependencies.pasta_curves]
+path = "../pasta_curves"
 version = "0.5"
 
 [dependencies.plotters]

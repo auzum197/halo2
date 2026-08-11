@@ -48,6 +48,7 @@ default-features = false
 version = "0.13"
 
 [dependencies.pasta_curves]
+path = "../pasta_curves"
 version = "0.5"
 
 [features]
