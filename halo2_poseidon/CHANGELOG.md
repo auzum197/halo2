@@ -7,6 +7,9 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- MSRV is now 1.88.
+
 ## [0.1.0] - 2024-12-16
 Initial release, extracted from `halo2_gadgets 0.3.0`. Includes minor changes
 for `no-std` support.

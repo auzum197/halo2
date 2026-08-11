@@ -7,6 +7,9 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- MSRV is now 1.88.
+
 ## [0.5.0] - 2026-06-02
 
 ### Added
