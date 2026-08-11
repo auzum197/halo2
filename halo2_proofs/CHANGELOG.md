@@ -8,6 +8,7 @@ and this project adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
+- Zero-padded FFTs now skip stages that only combine known-zero coefficients.
 - MSRV is now 1.88.
 
 ## [0.3.5] - 2026-08-02
