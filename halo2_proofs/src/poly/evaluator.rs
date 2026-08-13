@@ -183,6 +183,153 @@ fn shared_factor_run<E, F: Field, B: Basis>(
     None
 }
 
+const MIN_SELECTOR_FAMILY_LEN: usize = 4;
+
+struct SelectorRunMatch {
+    assigned_root: usize,
+    start: usize,
+    end: usize,
+    side: FactorSide,
+}
+
+struct SelectorFamilyMatch<E, B: Basis> {
+    query: AstLeaf<E, B>,
+    combination_len: usize,
+    runs: Vec<SelectorRunMatch>,
+}
+
+fn selector_difference<E, F: Field, B: Basis>(
+    ast: &Ast<E, F, B>,
+    minus_one: F,
+) -> Option<(F, &AstLeaf<E, B>)> {
+    match ast {
+        Ast::Add(constant, negated_query) => match (constant.as_ref(), negated_query.as_ref()) {
+            (Ast::ConstantTerm(root), Ast::Scale(query, scalar)) if *scalar == minus_one => {
+                match query.as_ref() {
+                    Ast::Poly(query) => Some((*root, query)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Recognizes the exact expression emitted for a compressed selector.
+fn compressed_selector<E, F: Field, B: Basis>(
+    ast: &Ast<E, F, B>,
+    minus_one: F,
+) -> Option<(&AstLeaf<E, B>, usize, usize)> {
+    let mut prefix = ast;
+    let mut query = None;
+    let mut roots = vec![];
+    while let Ast::Mul(AstMul(lhs, rhs)) = prefix {
+        let (root, candidate_query) = selector_difference(rhs, minus_one)?;
+        match query {
+            Some(query) if query != candidate_query => return None,
+            Some(_) => {}
+            None => query = Some(candidate_query),
+        }
+        roots.push(root);
+        prefix = lhs;
+    }
+
+    let prefix_query = match prefix {
+        Ast::Poly(query) => query,
+        _ => return None,
+    };
+    if query.is_some_and(|query| query != prefix_query) {
+        return None;
+    }
+
+    let combination_len = roots.len() + 1;
+    if combination_len < MIN_SELECTOR_FAMILY_LEN {
+        return None;
+    }
+
+    // Roots are appended in ascending order, but peeling the left-nested
+    // product above encounters them in reverse.
+    roots.reverse();
+    let mut roots = roots.iter().peekable();
+    let mut expected = F::ONE;
+    let mut assigned_root = None;
+    for root_index in 1..=combination_len {
+        if roots.peek().is_some_and(|root| **root == expected) {
+            roots.next();
+        } else if assigned_root.is_none() {
+            assigned_root = Some(root_index);
+        } else {
+            return None;
+        }
+        expected += F::ONE;
+    }
+    if roots.next().is_some() {
+        return None;
+    }
+
+    Some((prefix_query, combination_len, assigned_root?))
+}
+
+fn selector_family_matches<E: Copy, F: Field, B: Basis>(
+    terms: &[Ast<E, F, B>],
+    minus_one: F,
+) -> Vec<SelectorFamilyMatch<E, B>> {
+    let mut families: Vec<SelectorFamilyMatch<E, B>> = vec![];
+    let mut start = 0;
+    while start < terms.len() {
+        let candidate = [FactorSide::Left, FactorSide::Right]
+            .into_iter()
+            .find_map(|side| {
+                let (factor, _) = factor_terms(&terms[start], side)?;
+                let (query, combination_len, assigned_root) =
+                    compressed_selector(factor, minus_one)?;
+                Some((side, factor, *query, combination_len, assigned_root))
+            });
+
+        if let Some((side, factor, query, combination_len, assigned_root)) = candidate {
+            let mut end = start + 1;
+            while end < terms.len()
+                && factor_terms(&terms[end], side)
+                    .is_some_and(|(candidate, _)| same_ast(factor, candidate))
+            {
+                end += 1;
+            }
+            let run = SelectorRunMatch {
+                assigned_root,
+                start,
+                end,
+                side,
+            };
+            match families
+                .iter_mut()
+                .find(|family| family.combination_len == combination_len && family.query == query)
+            {
+                Some(family) => family.runs.push(run),
+                None => families.push(SelectorFamilyMatch {
+                    query,
+                    combination_len,
+                    runs: vec![run],
+                }),
+            }
+            start = end;
+        } else {
+            start += 1;
+        }
+    }
+
+    families.retain_mut(|family| {
+        family.runs.sort_by_key(|run| run.assigned_root);
+        family.runs.len() == family.combination_len
+            && family
+                .runs
+                .iter()
+                .enumerate()
+                .all(|(index, run)| run.assigned_root == index + 1)
+    });
+    families
+}
+
 // A private evaluator program compiled once before parallel chunk evaluation.
 // Structural AST matching and challenge-power calculation happen only while
 // constructing this plan.
@@ -209,6 +356,15 @@ enum DistributionWork<E, F: Field, B: Basis> {
         bodies: Vec<EvaluationPlan<E, F, B>>,
         power: F,
     },
+    SelectorFamily {
+        query: AstLeaf<E, B>,
+        runs: Vec<SelectorFamilyRun<E, F, B>>,
+    },
+}
+
+struct SelectorFamilyRun<E, F: Field, B: Basis> {
+    bodies: Vec<EvaluationPlan<E, F, B>>,
+    power: F,
 }
 
 impl<E: Copy, F: Field, B: Basis> EvaluationPlan<E, F, B> {
@@ -234,13 +390,61 @@ impl<E: Copy, F: Field, B: Basis> EvaluationPlan<E, F, B> {
             [term] => Self::compile(term),
             terms => {
                 let mut work = Vec::with_capacity(terms.len());
+                let mut powers = Vec::with_capacity(terms.len());
                 let mut power = F::ONE;
+                for _ in terms {
+                    powers.push(power);
+                    power *= base;
+                }
+
+                let selector_families = selector_family_matches(terms, -F::ONE);
+                let mut claimed = vec![false; terms.len()];
+                for family in selector_families {
+                    let runs = family
+                        .runs
+                        .into_iter()
+                        .map(|run| {
+                            debug_assert!(claimed[run.start..run.end].iter().all(|value| !value));
+                            claimed[run.start..run.end].fill(true);
+                            let bodies = terms[run.start..run.end]
+                                .iter()
+                                .map(|term| {
+                                    let (_, body) = factor_terms(term, run.side)
+                                        .expect("a selector-family run only contains products");
+                                    Self::compile(body)
+                                })
+                                .collect();
+                            SelectorFamilyRun {
+                                bodies,
+                                power: powers[terms.len() - run.end],
+                            }
+                        })
+                        .collect();
+                    work.push(DistributionWork::SelectorFamily {
+                        query: family.query,
+                        runs,
+                    });
+                }
+
                 let mut end = terms.len();
 
                 // Traverse from the lowest original challenge power to the
                 // highest, preserving every term's exact weight.
                 while end > 0 {
-                    if let Some((start, factor, side)) = shared_factor_run(terms, end) {
+                    if claimed[end - 1] {
+                        end -= 1;
+                        continue;
+                    }
+
+                    let unclaimed_start = claimed[..end]
+                        .iter()
+                        .rposition(|value| *value)
+                        .map(|position| position + 1)
+                        .unwrap_or(0);
+                    let shared_run =
+                        shared_factor_run(&terms[unclaimed_start..end], end - unclaimed_start)
+                            .map(|(start, factor, side)| (unclaimed_start + start, factor, side));
+                    if let Some((start, factor, side)) = shared_run {
                         let bodies = terms[start..end]
                             .iter()
                             .map(|term| {
@@ -253,19 +457,14 @@ impl<E: Copy, F: Field, B: Basis> EvaluationPlan<E, F, B> {
                         work.push(DistributionWork::SharedFactor {
                             factor: Self::compile(factor),
                             bodies,
-                            power,
+                            power: powers[terms.len() - end],
                         });
-
-                        for _ in start..end {
-                            power *= base;
-                        }
                         end = start;
                     } else {
                         work.push(DistributionWork::Term {
                             term: Self::compile(&terms[end - 1]),
-                            power,
+                            power: powers[terms.len() - end],
                         });
-                        power *= base;
                         end -= 1;
                     }
                 }
@@ -306,6 +505,18 @@ impl<E: Copy, F: Field, B: Basis> DistributionWork<E, F, B> {
                         .max()
                         .unwrap_or(0),
                 )
+            }
+            Self::SelectorFamily { runs, .. } => {
+                // Prefixes and a suffix occupy `runs.len() + 1` slots. One
+                // additional slot evaluates subsequent bodies.
+                runs.len()
+                    + 2
+                    + runs
+                        .iter()
+                        .flat_map(|run| &run.bodies)
+                        .map(EvaluationPlan::required_scratch_slots)
+                        .max()
+                        .unwrap_or(0)
             }
         }
     }
@@ -375,6 +586,80 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
                         *group *= base;
                         *group += term;
                     }
+                }
+            }
+        }
+
+        fn accumulate_selector_family<E, F: WithSmallOrderMulGroup<3>, B: BasisOps>(
+            query: &AstLeaf<E, B>,
+            runs: &[SelectorFamilyRun<E, F, B>],
+            base: F,
+            ctx: &AstContext<'_, F, B>,
+            output: &mut [F],
+            scratch: &mut [F],
+            accumulators: &mut [F],
+        ) {
+            let chunk_len = output.len();
+            let selector_slots = runs.len() + 1;
+            let (selector_scratch, body_scratch) = scratch.split_at_mut(selector_slots * chunk_len);
+            let (prefixes, suffix) = selector_scratch.split_at_mut(runs.len() * chunk_len);
+            B::copy_rotated_chunk(
+                ctx.domain,
+                ctx.chunk_size,
+                ctx.chunk_index,
+                &ctx.polys[query.index],
+                query.rotation,
+                &mut prefixes[..chunk_len],
+            );
+
+            let mut root = F::ONE;
+            // Prefix `r` is q * product(i - q) for roots i below r.
+            for index in 1..runs.len() {
+                let (previous, current) = prefixes.split_at_mut(index * chunk_len);
+                let query = &previous[..chunk_len];
+                let previous = &previous[previous.len() - chunk_len..];
+                let current = &mut current[..chunk_len];
+                for ((current, previous), query) in
+                    current.iter_mut().zip(previous.iter()).zip(query.iter())
+                {
+                    *current = *previous * (root - query);
+                }
+                root += F::ONE;
+            }
+
+            let mut has_suffix = false;
+            for (index, run) in runs.iter().enumerate().rev() {
+                {
+                    let selector = &mut prefixes[index * chunk_len..(index + 1) * chunk_len];
+                    if has_suffix {
+                        for (selector, suffix) in selector.iter_mut().zip(suffix.iter()) {
+                            *selector *= *suffix;
+                        }
+                    }
+
+                    recurse_factor_body(&run.bodies, base, ctx, output, body_scratch);
+                    for ((accumulator, selector), body) in accumulators
+                        .iter_mut()
+                        .zip(selector.iter())
+                        .zip(output.iter())
+                    {
+                        *accumulator += *selector * body * run.power;
+                    }
+                }
+
+                if index > 0 {
+                    let query = &prefixes[..chunk_len];
+                    if has_suffix {
+                        for (suffix, query) in suffix.iter_mut().zip(query.iter()) {
+                            *suffix *= root - query;
+                        }
+                    } else {
+                        for (suffix, query) in suffix.iter_mut().zip(query.iter()) {
+                            *suffix = root - query;
+                        }
+                        has_suffix = true;
+                    }
+                    root -= F::ONE;
                 }
             }
         }
@@ -470,6 +755,17 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
                                 {
                                     *accumulator += *factor * group * *power;
                                 }
+                            }
+                            DistributionWork::SelectorFamily { query, runs } => {
+                                accumulate_selector_family(
+                                    query,
+                                    runs,
+                                    *base,
+                                    ctx,
+                                    output,
+                                    scratch,
+                                    &mut accumulators,
+                                );
                             }
                         }
                     }
@@ -922,8 +1218,8 @@ mod tests {
     use pasta_curves::{pallas, vesta};
 
     use super::{
-        get_chunk_params, new_evaluator, Ast, BasisOps, DistributionWork, EvaluationPlan,
-        Evaluator, FactorSide,
+        compressed_selector, get_chunk_params, new_evaluator, selector_family_matches, Ast,
+        AstLeaf, BasisOps, DistributionWork, EvaluationPlan, Evaluator, FactorSide,
     };
     use crate::poly::{Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff, Rotation};
 
@@ -1446,5 +1742,232 @@ mod tests {
     fn shared_factor_runs_match_generic_evaluation() {
         check_shared_factor_runs::<pallas::Base>();
         check_shared_factor_runs::<vesta::Base>();
+    }
+
+    fn compressed_selector_expression<E: Copy, F: Field>(
+        query: AstLeaf<E, ExtendedLagrangeCoeff>,
+        combination_len: usize,
+        assigned_root: usize,
+    ) -> Ast<E, F, ExtendedLagrangeCoeff> {
+        let mut expression = Ast::from(query);
+        let mut root = F::ONE;
+        for root_index in 1..=combination_len {
+            if root_index != assigned_root {
+                expression = expression * (Ast::ConstantTerm(root) - Ast::from(query));
+            }
+            root += F::ONE;
+        }
+        expression
+    }
+
+    fn compressed_selector_value<F: Field>(
+        query: F,
+        combination_len: usize,
+        assigned_root: usize,
+    ) -> F {
+        let mut value = query;
+        let mut root = F::ONE;
+        for root_index in 1..=combination_len {
+            if root_index != assigned_root {
+                value *= root - query;
+            }
+            root += F::ONE;
+        }
+        value
+    }
+
+    fn check_compressed_selector_families<F>()
+    where
+        F: WithSmallOrderMulGroup<3> + From<u64>,
+    {
+        const COMBINATION_LEN: usize = 5;
+
+        let domain = EvaluationDomain::new(3, 3);
+        let mut query_poly = domain.empty_extended();
+        for (row, value) in query_poly.iter_mut().enumerate() {
+            *value = F::from((row % 11 + 1) as u64);
+        }
+        let query_values = domain
+            .rotate_extended(&query_poly, Rotation::next())
+            .to_vec();
+
+        let mut body_polys = vec![];
+        for body_index in 0..=COMBINATION_LEN {
+            let mut body = domain.empty_extended();
+            for (row, value) in body.iter_mut().enumerate() {
+                *value = F::from((body_index * 17 + row * 3 + 2) as u64);
+            }
+            body_polys.push(body);
+        }
+        let body_values = body_polys
+            .iter()
+            .map(|body| body.to_vec())
+            .collect::<Vec<_>>();
+
+        let mut evaluator = new_evaluator::<_, F, ExtendedLagrangeCoeff>(|| {});
+        let query = evaluator
+            .register_poly(query_poly)
+            .with_rotation(Rotation::next());
+        let bodies = body_polys
+            .into_iter()
+            .map(|body| evaluator.register_poly(body))
+            .collect::<Vec<_>>();
+
+        let mut terms = vec![];
+        let mut control_terms = vec![];
+        let mut term_inputs = vec![];
+        for assigned_root in 1..=COMBINATION_LEN {
+            let selector = compressed_selector_expression(query, COMBINATION_LEN, assigned_root);
+            let parsed = compressed_selector(&selector, -F::ONE)
+                .expect("the exact compressed-selector shape should be recognized");
+            assert_eq!(parsed.1, COMBINATION_LEN);
+            assert_eq!(parsed.2, assigned_root);
+
+            let repetitions = if assigned_root == 2 { 2 } else { 1 };
+            for repetition in 0..repetitions {
+                let body_index = if repetition == 0 {
+                    assigned_root - 1
+                } else {
+                    COMBINATION_LEN
+                };
+                terms.push(selector.clone() * Ast::from(bodies[body_index]));
+                control_terms.push(
+                    (selector.clone() * Ast::ConstantTerm(F::ONE)) * Ast::from(bodies[body_index]),
+                );
+                term_inputs.push(Some((assigned_root, body_index)));
+            }
+        }
+
+        // Keep one unrelated term after the planned family to ensure that
+        // every original challenge power is retained.
+        terms.push(Ast::from(bodies[0]) + Ast::from(bodies[COMBINATION_LEN - 1]));
+        control_terms.push(Ast::from(bodies[0]) + Ast::from(bodies[COMBINATION_LEN - 1]));
+        term_inputs.push(None);
+
+        let families = selector_family_matches(&terms, -F::ONE);
+        assert_eq!(families.len(), 1);
+        assert_eq!(families[0].combination_len, COMBINATION_LEN);
+        assert_eq!(families[0].runs.len(), COMBINATION_LEN);
+        assert_eq!(families[0].runs[1].end - families[0].runs[1].start, 2);
+        assert!(selector_family_matches(&control_terms, -F::ONE).is_empty());
+
+        let base = F::from(19);
+        let planned_ast = Ast::distribute_powers(terms.clone(), base);
+        let plan = EvaluationPlan::compile(&planned_ast);
+        let work = match plan {
+            EvaluationPlan::DistributePowers { work, .. } => work,
+            _ => panic!("multiple terms compile to distributed work"),
+        };
+        assert_eq!(work.len(), 2);
+        let runs = work
+            .iter()
+            .find_map(|work| match work {
+                DistributionWork::SelectorFamily {
+                    query: planned,
+                    runs,
+                } => {
+                    assert_eq!(*planned, query);
+                    Some(runs)
+                }
+                _ => None,
+            })
+            .expect("the complete selector family is planned");
+        assert_eq!(runs.len(), COMBINATION_LEN);
+        assert_eq!(runs[1].bodies.len(), 2);
+        assert_eq!(runs[4].power, base);
+
+        for base in [F::ZERO, F::ONE, F::from(19)] {
+            let actual = evaluator.evaluate(&Ast::distribute_powers(terms.clone(), base), &domain);
+            let control = evaluator.evaluate(
+                &Ast::distribute_powers(control_terms.clone(), base),
+                &domain,
+            );
+            assert_eq!(&actual[..], &control[..]);
+
+            for row in 0..actual.len() {
+                let expected = term_inputs.iter().fold(F::ZERO, |accumulator, input| {
+                    let term = match input {
+                        Some((assigned_root, body_index)) => {
+                            compressed_selector_value(
+                                query_values[row],
+                                COMBINATION_LEN,
+                                *assigned_root,
+                            ) * body_values[*body_index][row]
+                        }
+                        None => body_values[0][row] + body_values[COMBINATION_LEN - 1][row],
+                    };
+                    accumulator * base + term
+                });
+                assert_eq!(actual[row], expected);
+            }
+        }
+
+        let incomplete = terms[..terms.len() - 2].to_vec();
+        assert!(selector_family_matches(&incomplete, -F::ONE).is_empty());
+
+        let right_hand = (1..=COMBINATION_LEN)
+            .map(|assigned_root| {
+                Ast::from(bodies[assigned_root - 1])
+                    * compressed_selector_expression(query, COMBINATION_LEN, assigned_root)
+            })
+            .collect::<Vec<_>>();
+        let right_hand_control = (1..=COMBINATION_LEN)
+            .map(|assigned_root| {
+                Ast::from(bodies[assigned_root - 1])
+                    * (compressed_selector_expression(query, COMBINATION_LEN, assigned_root)
+                        * Ast::ConstantTerm(F::ONE))
+            })
+            .collect::<Vec<_>>();
+        let right_hand_families = selector_family_matches(&right_hand, -F::ONE);
+        assert_eq!(right_hand_families.len(), 1);
+        assert!(right_hand_families[0]
+            .runs
+            .iter()
+            .all(|run| matches!(run.side, FactorSide::Right)));
+
+        // Reverse the roots and put the unrelated term before the family to
+        // exercise non-root run order and leading unclaimed terms.
+        let reversed = terms.iter().cloned().rev().collect::<Vec<_>>();
+        let reversed_control = control_terms.iter().cloned().rev().collect::<Vec<_>>();
+        assert_eq!(selector_family_matches(&reversed, -F::ONE).len(), 1);
+        for (candidate, control) in [
+            (right_hand, right_hand_control),
+            (reversed, reversed_control),
+        ] {
+            for base in [F::ZERO, F::ONE, F::from(19)] {
+                let candidate =
+                    evaluator.evaluate(&Ast::distribute_powers(candidate.clone(), base), &domain);
+                let control =
+                    evaluator.evaluate(&Ast::distribute_powers(control.clone(), base), &domain);
+                assert_eq!(&candidate[..], &control[..]);
+            }
+        }
+
+        let overlapping = (1..=COMBINATION_LEN)
+            .map(|assigned_root| {
+                compressed_selector_expression(query, COMBINATION_LEN, assigned_root)
+                    * compressed_selector_expression(bodies[0], COMBINATION_LEN, assigned_root)
+            })
+            .collect::<Vec<_>>();
+        // Both factors form complete families, but each term can be claimed
+        // only once. Deterministically preferring the left family is safe.
+        let overlapping_families = selector_family_matches(&overlapping, -F::ONE);
+        assert_eq!(overlapping_families.len(), 1);
+        assert_eq!(overlapping_families[0].query, query);
+
+        let mut repeated_run = terms.clone();
+        repeated_run
+            .push(compressed_selector_expression(query, COMBINATION_LEN, 1) * Ast::from(bodies[0]));
+        assert!(selector_family_matches(&repeated_run, -F::ONE).is_empty());
+
+        let non_selector =
+            Ast::from(query) * (Ast::ConstantTerm(F::ONE) + Ast::<_, F, _>::from(query));
+        assert!(compressed_selector(&non_selector, -F::ONE).is_none());
+    }
+
+    #[test]
+    fn compressed_selector_families_match_generic_evaluation() {
+        check_compressed_selector_families::<pallas::Base>();
+        check_compressed_selector_families::<vesta::Base>();
     }
 }
