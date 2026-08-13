@@ -351,6 +351,10 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
             two: F,
         }
 
+        // `scratch` is preallocated per-chunk workspace whose size is derived
+        // from the compiled plan. The first body can use the entire slice. For
+        // each remaining body, one output-sized region holds its values while
+        // the rest is available to that body's recursive evaluation.
         fn recurse_factor_body<E, F: WithSmallOrderMulGroup<3>, B: BasisOps>(
             bodies: &[EvaluationPlan<E, F, B>],
             base: F,
