@@ -1981,6 +1981,52 @@ mod tests {
             }
         }
 
+        let nested_base = F::from(19);
+        let outer_base = F::from(23);
+        let factor = Ast::from(bodies[0]) + Ast::ConstantTerm(F::from(3));
+        let nested = Ast::distribute_powers(terms.clone(), nested_base);
+        let nested_control = Ast::distribute_powers(control_terms.clone(), nested_base);
+        let candidate = Ast::distribute_powers(
+            [
+                factor.clone() * nested,
+                factor.clone() * Ast::from(bodies[1]),
+            ],
+            outer_base,
+        );
+        let control = Ast::distribute_powers(
+            [
+                factor.clone() * nested_control,
+                factor * Ast::from(bodies[1]),
+            ],
+            outer_base,
+        );
+
+        let nested_plan = EvaluationPlan::compile(&candidate);
+        let shared_bodies = match &nested_plan {
+            EvaluationPlan::DistributePowers { work, .. } => work
+                .iter()
+                .find_map(|work| match work {
+                    DistributionWork::SharedFactor { bodies, .. } => Some(bodies),
+                    _ => None,
+                })
+                .expect("the outer shared factor is planned"),
+            _ => panic!("the outer terms compile to distributed work"),
+        };
+        let nested_work = match &shared_bodies[0] {
+            EvaluationPlan::DistributePowers { work, .. } => work,
+            _ => panic!("the first shared-factor body is distributed work"),
+        };
+        assert!(nested_work
+            .iter()
+            .any(|work| matches!(work, DistributionWork::SelectorFamily { .. })));
+        // Five selector runs need eight slots, and the outer shared-factor
+        // evaluation adds two more.
+        assert_eq!(nested_plan.required_scratch_slots(), COMBINATION_LEN + 5);
+
+        let actual = evaluator.evaluate(&candidate, &domain);
+        let generic = evaluator.evaluate(&control, &domain);
+        assert_eq!(&actual[..], &generic[..]);
+
         let incomplete = terms[..terms.len() - 2].to_vec();
         assert!(selector_family_matches(&incomplete, -F::ONE).is_empty());
 
