@@ -18,3 +18,5 @@ and this project adheres to Rust's notion of
   dependency no longer compiles on current Rust nightlies.
 - Polynomial evaluation now shares missing-root products across complete
   compressed-selector families.
+- Polynomial evaluation now uses field squaring for structurally repeated
+  multiplication operands.
