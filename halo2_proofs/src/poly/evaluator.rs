@@ -337,6 +337,7 @@ enum EvaluationPlan<E, F: Field, B: Basis> {
     Poly(AstLeaf<E, B>),
     Add(Box<Self>, Box<Self>),
     Mul(Box<Self>, Box<Self>),
+    Square(Box<Self>),
     Scale(Box<Self>, F),
     DistributePowers {
         work: Vec<DistributionWork<E, F, B>>,
@@ -373,6 +374,9 @@ impl<E: Copy, F: Field, B: Basis> EvaluationPlan<E, F, B> {
             Ast::Poly(leaf) => Self::Poly(*leaf),
             Ast::Add(lhs, rhs) => {
                 Self::Add(Box::new(Self::compile(lhs)), Box::new(Self::compile(rhs)))
+            }
+            Ast::Mul(AstMul(lhs, rhs)) if same_ast(lhs, rhs) => {
+                Self::Square(Box::new(Self::compile(lhs)))
             }
             Ast::Mul(AstMul(lhs, rhs)) => {
                 Self::Mul(Box::new(Self::compile(lhs)), Box::new(Self::compile(rhs)))
@@ -480,7 +484,7 @@ impl<E: Copy, F: Field, B: Basis> EvaluationPlan<E, F, B> {
             Self::Add(lhs, rhs) | Self::Mul(lhs, rhs) => lhs
                 .required_scratch_slots()
                 .max(1 + rhs.required_scratch_slots()),
-            Self::Scale(inner, _) => inner.required_scratch_slots(),
+            Self::Square(inner) | Self::Scale(inner, _) => inner.required_scratch_slots(),
             Self::DistributePowers { work, .. } => work
                 .iter()
                 .map(DistributionWork::required_scratch_slots)
@@ -716,6 +720,12 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
                     recurse_into(b, ctx, rhs, rhs_scratch);
                     for (lhs, rhs) in output.iter_mut().zip(rhs.iter()) {
                         *lhs *= *rhs;
+                    }
+                }
+                EvaluationPlan::Square(inner) => {
+                    recurse_into(inner, ctx, output, scratch);
+                    for value in output.iter_mut() {
+                        *value = value.square();
                     }
                 }
                 EvaluationPlan::Scale(a, scalar) => {
@@ -1556,6 +1566,66 @@ mod tests {
         }
     }
 
+    fn check_repeated_subexpressions_use_squares<F, B>()
+    where
+        F: WithSmallOrderMulGroup<3> + From<u64>,
+        B: BasisOps,
+        Ast<fn(), F, B>: std::ops::Mul<Output = Ast<fn(), F, B>>,
+    {
+        fn context() {}
+
+        let domain = EvaluationDomain::new(3, 4);
+        let mut values = B::empty_poly(&domain);
+        for (index, value) in values.iter_mut().enumerate() {
+            *value = F::from(index as u64 + 3);
+        }
+
+        let mut evaluator = new_evaluator::<fn(), _, B>(context);
+        let leaf = evaluator.register_poly(values);
+        let repeated =
+            Ast::from(leaf.with_rotation(Rotation::prev())) + Ast::ConstantTerm(F::from(7));
+        let inner_square = repeated.clone() * repeated.clone();
+        let nested_square = inner_square.clone() * inner_square;
+        let plan = EvaluationPlan::compile(&nested_square);
+        match &plan {
+            EvaluationPlan::Square(inner) => {
+                assert!(matches!(inner.as_ref(), EvaluationPlan::Square(_)));
+            }
+            _ => panic!("nested repeated operands compile to nested squares"),
+        }
+
+        let expected = evaluator.evaluate(&repeated, &domain);
+        let actual = evaluator.evaluate(&nested_square, &domain);
+        assert!(actual
+            .iter()
+            .zip(expected.iter())
+            .all(|(actual, expected)| *actual == expected.square().square()));
+
+        let lhs = Ast::from(leaf.with_rotation(Rotation::prev()));
+        let rhs = Ast::from(leaf.with_rotation(Rotation::next()));
+        let product = lhs.clone() * rhs.clone();
+        assert!(matches!(
+            EvaluationPlan::compile(&product),
+            EvaluationPlan::Mul(_, _)
+        ));
+
+        let expected_lhs = evaluator.evaluate(&lhs, &domain);
+        let expected_rhs = evaluator.evaluate(&rhs, &domain);
+        let actual = evaluator.evaluate(&product, &domain);
+        assert!(actual
+            .iter()
+            .zip(expected_lhs.iter().zip(expected_rhs.iter()))
+            .all(|(actual, (lhs, rhs))| *actual == *lhs * rhs));
+    }
+
+    #[test]
+    fn repeated_subexpressions_use_squares() {
+        check_repeated_subexpressions_use_squares::<pallas::Base, LagrangeCoeff>();
+        check_repeated_subexpressions_use_squares::<pallas::Base, ExtendedLagrangeCoeff>();
+        check_repeated_subexpressions_use_squares::<vesta::Base, LagrangeCoeff>();
+        check_repeated_subexpressions_use_squares::<vesta::Base, ExtendedLagrangeCoeff>();
+    }
+
     #[test]
     fn extended_shared_factors_support_nested_rotated_bodies() {
         let domain = EvaluationDomain::new(5, 4);
@@ -1830,11 +1900,15 @@ mod tests {
                 } else {
                     COMBINATION_LEN
                 };
-                terms.push(selector.clone() * Ast::from(bodies[body_index]));
-                control_terms.push(
-                    (selector.clone() * Ast::ConstantTerm(F::ONE)) * Ast::from(bodies[body_index]),
-                );
-                term_inputs.push(Some((assigned_root, body_index)));
+                let body = if repetition == 0 {
+                    Ast::from(bodies[body_index])
+                } else {
+                    let inner = Ast::from(bodies[body_index]) + Ast::from(bodies[0]);
+                    inner.clone() * inner
+                };
+                terms.push(selector.clone() * body.clone());
+                control_terms.push((selector.clone() * Ast::ConstantTerm(F::ONE)) * body);
+                term_inputs.push(Some((assigned_root, body_index, repetition != 0)));
             }
         }
 
@@ -1874,6 +1948,7 @@ mod tests {
             .expect("the complete selector family is planned");
         assert_eq!(runs.len(), COMBINATION_LEN);
         assert_eq!(runs[1].bodies.len(), 2);
+        assert!(matches!(&runs[1].bodies[1], EvaluationPlan::Square(_)));
         assert_eq!(runs[4].power, base);
 
         for base in [F::ZERO, F::ONE, F::from(19)] {
@@ -1887,12 +1962,16 @@ mod tests {
             for row in 0..actual.len() {
                 let expected = term_inputs.iter().fold(F::ZERO, |accumulator, input| {
                     let term = match input {
-                        Some((assigned_root, body_index)) => {
+                        Some((assigned_root, body_index, squared)) => {
+                            let mut body = body_values[*body_index][row];
+                            if *squared {
+                                body = (body + body_values[0][row]).square();
+                            }
                             compressed_selector_value(
                                 query_values[row],
                                 COMBINATION_LEN,
                                 *assigned_root,
-                            ) * body_values[*body_index][row]
+                            ) * body
                         }
                         None => body_values[0][row] + body_values[COMBINATION_LEN - 1][row],
                     };
