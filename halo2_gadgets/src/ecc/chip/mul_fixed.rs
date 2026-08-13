@@ -21,7 +21,7 @@ use halo2_proofs::{
 };
 use lazy_static::lazy_static;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
-use subtle::{Choice, ConditionallySelectable};
+use subtle::{ConditionallySelectable, ConstantTimeEq};
 
 pub mod base_field_elem;
 pub mod full_width;
@@ -34,21 +34,6 @@ lazy_static! {
     static ref H_BASE: pallas::Base = pallas::Base::from(H as u64);
 }
 
-/// Computes a multiplication by a scalar that fits in one more bit than a
-/// fixed-base window.
-fn small_scalar_mul(base: pallas::Point, scalar: usize) -> pallas::Point {
-    debug_assert!(scalar <= H + 1);
-
-    (0..=FIXED_BASE_WINDOW_SIZE)
-        .rev()
-        .fold(pallas::Point::identity(), |acc, bit| {
-            let acc = acc.double();
-            let sum = acc + base;
-            let bit_is_set = u8::from(((scalar >> bit) & 1) != 0);
-            pallas::Point::conditional_select(&acc, &sum, Choice::from(bit_is_set))
-        })
-}
-
 /// Computes the points selected by a fixed-base scalar's windows.
 fn compute_window_points(base: pallas::Affine, windows: &[usize]) -> Vec<pallas::Affine> {
     assert!(!windows.is_empty());
@@ -56,14 +41,21 @@ fn compute_window_points(base: pallas::Affine, windows: &[usize]) -> Vec<pallas:
 
     let mut window_base = base.to_curve();
     let mut offset_acc = pallas::Point::identity();
-    let mut points = Vec::with_capacity(windows.len());
+    let mut candidates = Vec::with_capacity(windows.len() * H);
 
-    for window in windows.iter().take(windows.len() - 1) {
-        // [(k_w + 2) * 8^w] B
-        points.push(small_scalar_mul(window_base, *window + WINDOW_OFFSET));
+    for _ in windows.iter().take(windows.len() - 1) {
+        // Build every possible [(k_w + 2) * 8^w] B independently of k_w.
+        let offset = window_base.double();
+        let mut candidate = offset;
+        for digit in WINDOW_OFFSET..(H + WINDOW_OFFSET) {
+            candidates.push(candidate);
+            if digit + 1 < H + WINDOW_OFFSET {
+                candidate += window_base;
+            }
+        }
 
         // The most-significant window subtracts the accumulated offsets.
-        offset_acc += window_base.double();
+        offset_acc += offset;
 
         // Advance from [8^w] B to [8^(w + 1)] B.
         for _ in 0..FIXED_BASE_WINDOW_SIZE {
@@ -71,8 +63,29 @@ fn compute_window_points(base: pallas::Affine, windows: &[usize]) -> Vec<pallas:
         }
     }
 
-    // [k_w * 8^w] B - sum_{j=0}^{w-1} [2 * 8^j] B
-    points.push(small_scalar_mul(window_base, windows[windows.len() - 1]) - offset_acc);
+    // Build every possible
+    // [k_w * 8^w] B - sum_{j=0}^{w-1} [2 * 8^j] B independently of k_w.
+    let mut candidate = -offset_acc;
+    for digit in 0..H {
+        candidates.push(candidate);
+        if digit + 1 < H {
+            candidate += window_base;
+        }
+    }
+
+    let points = candidates
+        .chunks_exact(H)
+        .zip(windows)
+        .map(|(candidates, window)| {
+            candidates.iter().enumerate().skip(1).fold(
+                candidates[0],
+                |selected, (digit, candidate)| {
+                    let choice = (*window as u8).ct_eq(&(digit as u8));
+                    pallas::Point::conditional_select(&selected, candidate, choice)
+                },
+            )
+        })
+        .collect::<Vec<_>>();
 
     let mut affine_points = vec![pallas::Affine::identity(); points.len()];
     pallas::Point::batch_normalize(&points, &mut affine_points);
@@ -542,27 +555,15 @@ mod tests {
     }
 
     #[test]
-    fn small_scalar_mul_matches_curve_multiplication() {
-        let base = pallas::Point::generator();
-
-        for scalar in 0..=(H + 1) {
-            assert_eq!(
-                small_scalar_mul(base, scalar),
-                base * pallas::Scalar::from(scalar as u64),
-            );
-        }
-    }
-
-    #[test]
     fn window_points_match_curve_multiplication() {
         let base = pallas::Point::generator().to_affine();
 
         for num_windows in [NUM_WINDOWS_SHORT, NUM_WINDOWS] {
-            for windows in [
-                vec![0; num_windows],
-                (0..num_windows).map(|w| w % H).collect(),
-                vec![H - 1; num_windows],
-            ] {
+            let mut cases = (0..H)
+                .map(|digit| vec![digit; num_windows])
+                .collect::<Vec<_>>();
+            cases.push((0..num_windows).map(|w| w % H).collect());
+            for windows in cases {
                 assert_eq!(
                     compute_window_points(base, &windows),
                     scalar_mul_window_points(base, &windows),
