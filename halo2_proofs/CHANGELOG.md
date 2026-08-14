@@ -27,6 +27,8 @@ and this project adheres to Rust's notion of
 - The minimum supported Rust version is now 1.88.
 
 ### Changed
+- Lookup compression now starts with its first expression, avoiding arithmetic
+  against a known zero prefix.
 - The IPA prover now batches the scalar multiplications used to collapse its
   generator vector, using GLV for Pasta curves because the Fiat-Shamir
   challenges are public.
