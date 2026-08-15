@@ -27,9 +27,6 @@ pub mod base_field_elem;
 pub mod full_width;
 pub mod short;
 
-/// Offset applied to non-MSB windows to avoid identity points.
-const WINDOW_OFFSET: usize = 2;
-
 lazy_static! {
     static ref H_BASE: pallas::Base = pallas::Base::from(H as u64);
 }
@@ -41,18 +38,13 @@ fn compute_window_points(base: pallas::Affine, windows: &[usize]) -> Vec<pallas:
 
     let mut window_base = base.to_curve();
     let mut offset_acc = pallas::Point::identity();
-    let mut candidates = Vec::with_capacity(windows.len() * H);
+    let mut points = Vec::with_capacity(windows.len());
 
-    for _ in windows.iter().take(windows.len() - 1) {
-        // Build every possible [(k_w + 2) * 8^w] B independently of k_w.
+    for window in windows.iter().take(windows.len() - 1) {
+        // Select from every possible [(k_w + 2) * 8^w] B, generating all of
+        // them independently of k_w.
         let offset = window_base.double();
-        let mut candidate = offset;
-        for digit in WINDOW_OFFSET..(H + WINDOW_OFFSET) {
-            candidates.push(candidate);
-            if digit + 1 < H + WINDOW_OFFSET {
-                candidate += window_base;
-            }
-        }
+        points.push(select_window_point(offset, window_base, *window));
 
         // The most-significant window subtracts the accumulated offsets.
         offset_acc += offset;
@@ -63,33 +55,32 @@ fn compute_window_points(base: pallas::Affine, windows: &[usize]) -> Vec<pallas:
         }
     }
 
-    // Build every possible
-    // [k_w * 8^w] B - sum_{j=0}^{w-1} [2 * 8^j] B independently of k_w.
-    let mut candidate = -offset_acc;
-    for digit in 0..H {
-        candidates.push(candidate);
-        if digit + 1 < H {
-            candidate += window_base;
-        }
-    }
-
-    let points = candidates
-        .chunks_exact(H)
-        .zip(windows)
-        .map(|(candidates, window)| {
-            candidates.iter().enumerate().skip(1).fold(
-                candidates[0],
-                |selected, (digit, candidate)| {
-                    let choice = (*window as u8).ct_eq(&(digit as u8));
-                    pallas::Point::conditional_select(&selected, candidate, choice)
-                },
-            )
-        })
-        .collect::<Vec<_>>();
+    // Select from every possible
+    // [k_w * 8^w] B - sum_{j=0}^{w-1} [2 * 8^j] B, generating all of them
+    // independently of k_w.
+    points.push(select_window_point(
+        -offset_acc,
+        window_base,
+        windows[windows.len() - 1],
+    ));
 
     let mut affine_points = vec![pallas::Affine::identity(); points.len()];
     pallas::Point::batch_normalize(&points, &mut affine_points);
     affine_points
+}
+
+/// Selects the `window`th point of the length-`H` sequence starting at
+/// `start` and advancing by `step`, in constant time with respect to
+/// `window`.
+fn select_window_point(start: pallas::Point, step: pallas::Point, window: usize) -> pallas::Point {
+    let mut candidate = start;
+    let mut selected = start;
+    for digit in 1..H {
+        candidate += step;
+        let choice = (window as u8).ct_eq(&(digit as u8));
+        selected = pallas::Point::conditional_select(&selected, &candidate, choice);
+    }
+    selected
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -525,6 +516,9 @@ mod tests {
     use super::*;
     use crate::ecc::chip::{NUM_WINDOWS, NUM_WINDOWS_SHORT};
     use group::ff::Field;
+
+    /// Offset applied to non-MSB windows to avoid identity points.
+    const WINDOW_OFFSET: usize = 2;
 
     fn scalar_mul_window_points(base: pallas::Affine, windows: &[usize]) -> Vec<pallas::Affine> {
         let h = pallas::Scalar::from(H as u64);
