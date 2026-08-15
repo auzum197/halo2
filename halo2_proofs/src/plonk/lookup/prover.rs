@@ -165,16 +165,16 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
                 .collect();
 
             // Compressed version of expressions
-            let compressed_expression = unpermuted_expressions.iter().fold(
-                poly::Ast::ConstantTerm(C::Scalar::ZERO),
-                |acc, expression| &(acc * *theta) + expression,
-            );
+            let compressed_expression = unpermuted_expressions
+                .into_iter()
+                .reduce(|acc, expression| acc * *theta + expression)
+                .unwrap_or(poly::Ast::ConstantTerm(C::Scalar::ZERO));
 
             // Compressed version of cosets
-            let compressed_coset = unpermuted_cosets.iter().fold(
-                poly::Ast::<_, _, ExtendedLagrangeCoeff>::ConstantTerm(C::Scalar::ZERO),
-                |acc, eval| acc * poly::Ast::ConstantTerm(*theta) + eval.clone(),
-            );
+            let compressed_coset = unpermuted_cosets
+                .into_iter()
+                .reduce(|acc, eval| acc * poly::Ast::ConstantTerm(*theta) + eval)
+                .unwrap_or(poly::Ast::ConstantTerm(C::Scalar::ZERO));
 
             (
                 compressed_coset,
