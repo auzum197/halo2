@@ -39,7 +39,7 @@ keywords = [
 ]
 categories = ["cryptography"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/zcash/halo2"
+repository = "https://github.com/zakura-core/libraries"
 resolver = "1"
 
 [package.metadata.docs.rs]
