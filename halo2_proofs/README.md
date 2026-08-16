@@ -1,6 +1,18 @@
-# halo2_proofs [![Crates.io](https://img.shields.io/crates/v/halo2_proofs.svg)](https://crates.io/crates/halo2_proofs) #
+# zakura-halo2-proofs [![Crates.io](https://img.shields.io/crates/v/zakura-halo2-proofs.svg)](https://crates.io/crates/zakura-halo2-proofs) #
 
-## [Documentation](https://docs.rs/halo2_proofs)
+`zakura-halo2-proofs` is the [Zakura](https://github.com/zakura-core/zakura)
+fork of the upstream [`halo2_proofs`](https://crates.io/crates/halo2_proofs)
+crate from [zcash/halo2](https://github.com/zcash/halo2), maintained in
+[zakura-core/libraries](https://github.com/zakura-core/libraries). The library
+target keeps the upstream name, so `use halo2_proofs::…` paths are unchanged.
+Use it as a drop-in replacement by renaming the dependency:
+
+```toml
+[dependencies]
+halo2_proofs = { package = "zakura-halo2-proofs", version = "0.3" }
+```
+
+## [Documentation](https://docs.rs/zakura-halo2-proofs)
 
 ## Minimum Supported Rust Version
 

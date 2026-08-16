@@ -12,12 +12,11 @@
 [package]
 edition = "2021"
 rust-version = "1.88"
-name = "halo2_poseidon"
+name = "zakura-halo2-poseidon"
 version = "0.1.0"
 authors = [
-    "Jack Grigg <jack@electriccoin.co>",
-    "Daira Emma Hopwood <daira@jacaranda.org>",
-    "Ying Tong Lai",
+    "Dev Ojha <ValarDragon@users.noreply.github.com>",
+    "Sean Bowe <ewillbefull@gmail.com>",
 ]
 build = false
 autolib = false
@@ -29,7 +28,7 @@ description = "The Poseidon algebraic hash function for Halo 2"
 readme = "README.md"
 categories = ["cryptography"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/zcash/halo2"
+repository = "https://github.com/zakura-core/libraries"
 resolver = "1"
 
 [lib]
@@ -50,6 +49,7 @@ version = "0.13"
 [dependencies.pasta_curves]
 path = "../pasta_curves"
 version = "0.5"
+package = "zakura-pasta-curves"
 
 [features]
 test-dependencies = []
