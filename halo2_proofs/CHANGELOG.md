@@ -10,3 +10,6 @@ and this project adheres to Rust's notion of
 
 - Forked from upstream `halo2_proofs` and renamed to `zakura-halo2-proofs`; this changelog starts
   fresh for the Zakura fork's initial release.
+- Restarted the version lineage at 1.0.0, leaving behind the inherited upstream
+  version (0.3.5); the initial Zakura release will be preceded by `1.0.0-rc` release
+  candidates.
