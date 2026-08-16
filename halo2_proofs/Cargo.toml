@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 rust-version = "1.88"
-name = "halo2_proofs"
+name = "zakura-halo2-proofs"
 version = "0.3.5"
 authors = [
     "Sean Bowe <sean@electriccoin.co>",
@@ -29,7 +29,7 @@ autobenches = false
 description = """
 Fast PLONK-based zero-knowledge proving system with no trusted setup
 """
-documentation = "https://docs.rs/halo2_proofs"
+documentation = "https://docs.rs/zakura-halo2-proofs"
 readme = "README.md"
 keywords = [
     "halo",
@@ -160,6 +160,7 @@ version = "0.13"
 path = "../halo2_legacy_pdqsort"
 version = "0.1.0"
 optional = true
+package = "zakura-halo2-legacy-pdqsort"
 
 [dependencies.indexmap]
 version = "1"
@@ -172,11 +173,13 @@ default-features = false
 path = "../pasta_curves"
 version = "0.5.2"
 features = ["glv"]
+package = "zakura-pasta-curves"
 
 [target.'cfg(all(target_arch = "aarch64", target_vendor = "apple"))'.dependencies.pasta_curves]
 path = "../pasta_curves"
 version = "0.5.2"
 features = ["aarch64-asm"]
+package = "zakura-pasta-curves"
 
 [dependencies.plotters]
 version = "0.3.0"
