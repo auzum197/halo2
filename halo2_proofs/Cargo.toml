@@ -15,10 +15,8 @@ rust-version = "1.88"
 name = "zakura-halo2-proofs"
 version = "0.3.5"
 authors = [
-    "Sean Bowe <sean@electriccoin.co>",
-    "Ying Tong Lai <yingtong@electriccoin.co>",
-    "Daira Emma Hopwood <daira@jacaranda.org>",
-    "Jack Grigg <jack@electriccoin.co>",
+    "Dev Ojha <ValarDragon@users.noreply.github.com>",
+    "Sean Bowe <ewillbefull@gmail.com>",
 ]
 build = false
 autolib = false
