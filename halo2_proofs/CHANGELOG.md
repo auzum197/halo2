@@ -27,6 +27,9 @@ and this project adheres to Rust's notion of
   canonical representation once per MSM instead of once per window.
 - `halo2_proofs::arithmetic::best_multiexp` now uses serial window
   accumulation when only one worker is available.
+- `halo2_proofs::arithmetic::best_multiexp` now uses signed Booth recoding to
+  reduce its Pippenger bucket count. Its window schedule is derived from the
+  scalar representation instead of assuming it is 256 bits wide.
 - `halo2_proofs::plonk::create_proof` now commits directly to the supplied
   instance values instead of zero-padding them to the evaluation domain first.
 - MSRV is now 1.88.
