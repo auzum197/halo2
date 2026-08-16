@@ -1,11 +1,23 @@
-# halo2_gadgets [![Crates.io](https://img.shields.io/crates/v/halo2_gadgets.svg)](https://crates.io/crates/halo2_gadgets) #
+# zakura-halo2-gadgets [![Crates.io](https://img.shields.io/crates/v/zakura-halo2-gadgets.svg)](https://crates.io/crates/zakura-halo2-gadgets) #
+
+`zakura-halo2-gadgets` is the [Zakura](https://github.com/zakura-core/zakura)
+fork of the upstream [`halo2_gadgets`](https://crates.io/crates/halo2_gadgets)
+crate from [zcash/halo2](https://github.com/zcash/halo2), maintained in
+[zakura-core/libraries](https://github.com/zakura-core/libraries). The library
+target keeps the upstream name, so `use halo2_gadgets::…` paths are unchanged.
+Use it as a drop-in replacement by renaming the dependency:
+
+```toml
+[dependencies]
+halo2_gadgets = { package = "zakura-halo2-gadgets", version = "0.5" }
+```
 
 Requires Rust 1.88+.
 
 ## Documentation
 
 - [The Halo 2 Book](https://zcash.github.io/halo2/)
-- [Crate documentation](https://docs.rs/halo2_gadgets)
+- [Crate documentation](https://docs.rs/zakura-halo2-gadgets)
 
 ## License
 
