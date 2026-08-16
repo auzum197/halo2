@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 rust-version = "1.88"
-name = "halo2_gadgets"
+name = "zakura-halo2-gadgets"
 version = "0.5.0"
 authors = [
     "Sean Bowe <sean@electriccoin.co>",
@@ -107,11 +107,13 @@ version = "0.13"
 path = "../halo2_poseidon"
 version = "0.1"
 default-features = false
+package = "zakura-halo2-poseidon"
 
 [dependencies.halo2_proofs]
 path = "../halo2_proofs"
 version = "0.3"
 default-features = false
+package = "zakura-halo2-proofs"
 
 [dependencies.lazy_static]
 version = "1"
@@ -119,6 +121,7 @@ version = "1"
 [dependencies.pasta_curves]
 path = "../pasta_curves"
 version = "0.5"
+package = "zakura-pasta-curves"
 
 [dependencies.plotters]
 version = "0.3.0"
@@ -135,6 +138,7 @@ version = "0.8"
 [dependencies.sinsemilla]
 path = "../sinsemilla"
 version = "0.1"
+package = "zakura-sinsemilla"
 
 [dependencies.subtle]
 version = "2.3"
@@ -150,6 +154,7 @@ path = "../halo2_poseidon"
 version = "0.1"
 features = ["test-dependencies"]
 default-features = false
+package = "zakura-halo2-poseidon"
 
 [dev-dependencies.proptest]
 version = "1.0.0"
@@ -158,6 +163,7 @@ version = "1.0.0"
 path = "../sinsemilla"
 version = "0.1"
 features = ["test-dependencies"]
+package = "zakura-sinsemilla"
 
 [target."cfg(unix)".dev-dependencies.inferno]
 version = ">=0.11, <0.11.5"
