@@ -2,7 +2,7 @@ use std::iter;
 
 use ff::Field;
 use group::Curve;
-use rand_core::RngCore;
+use rand_core::Rng;
 
 use super::Argument;
 use crate::{
@@ -39,7 +39,7 @@ impl<C: CurveAffine> Argument<C> {
     /// evaluation in the multiopening argument.
     pub(in crate::plonk) fn commit_random_polynomial<
         E: EncodedChallenge<C>,
-        R: RngCore,
+        R: Rng,
         T: TranscriptWrite<C, E>,
     >(
         params: &Params<C>,
@@ -53,7 +53,7 @@ impl<C: CurveAffine> Argument<C> {
             *coeff = C::Scalar::random(&mut rng);
         }
         // Sample a random blinding factor
-        let random_blind = Blind(C::Scalar::random(rng));
+        let random_blind = Blind(C::Scalar::random(&mut rng));
 
         // Commit
         let random_poly_commitment = params.commit(&random_poly, random_blind).to_affine();
@@ -72,7 +72,7 @@ impl<C: CurveAffine> CommittedRandomPolynomial<C> {
     pub(in crate::plonk) fn construct_quotient<
         E: EncodedChallenge<C>,
         Ev: Copy + Send + Sync,
-        R: RngCore,
+        R: Rng,
         T: TranscriptWrite<C, E>,
     >(
         self,

@@ -7,7 +7,7 @@ use group::ff::Field;
 use halo2_proofs::*;
 
 use criterion::{BatchSize, BenchmarkId, Criterion};
-use rand_core::OsRng;
+use rand::rng;
 
 const ORCHARD_K: u32 = 11;
 const ORCHARD_EXTENDED_K: u32 = 14;
@@ -16,8 +16,10 @@ fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("fft");
     for k in 3..19 {
         group.bench_function(BenchmarkId::new("k", k), |b| {
-            let mut a = (0..(1 << k)).map(|_| Fp::random(OsRng)).collect::<Vec<_>>();
-            let omega = Fp::random(OsRng); // would be weird if this mattered
+            let mut a = (0..(1 << k))
+                .map(|_| Fp::random(&mut rng()))
+                .collect::<Vec<_>>();
+            let omega = Fp::random(&mut rng()); // would be weird if this mattered
             b.iter(|| {
                 best_fft(&mut a, omega, k as u32);
             });
@@ -28,7 +30,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let domain = poly::EvaluationDomain::<Fp>::new(extension + 1, ORCHARD_K);
     assert_eq!(domain.extended_len(), 1 << ORCHARD_EXTENDED_K);
     let coefficients = (0..(1 << ORCHARD_K))
-        .map(|_| Fp::random(OsRng))
+        .map(|_| Fp::random(&mut rng()))
         .collect::<Vec<_>>();
 
     group.bench_function(

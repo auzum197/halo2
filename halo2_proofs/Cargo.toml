@@ -50,7 +50,7 @@ rustdoc-args = [
 ]
 
 [features]
-batch = ["rand_core/getrandom"]
+batch = ["dep:rand"]
 beta = []
 default = [
     "batch",
@@ -149,10 +149,10 @@ optional = true
 version = "1"
 
 [dependencies.ff]
-version = "0.13"
+version = "0.14"
 
 [dependencies.group]
-version = "0.13"
+version = "0.14"
 
 [dependencies.halo2_legacy_pdqsort]
 path = "../halo2_legacy_pdqsort"
@@ -185,7 +185,13 @@ optional = true
 default-features = false
 
 [dependencies.rand_core]
-version = "0.6"
+version = "0.10"
+default-features = false
+
+[dependencies.rand]
+version = "0.10"
+features = ["sys_rng"]
+optional = true
 default-features = false
 
 [dependencies.tabbycat]
@@ -215,10 +221,14 @@ version = ">=0.24, <0.24.5"
 version = "1"
 
 [dev-dependencies.rand_core]
-version = "0.6"
-features = ["getrandom"]
+version = "0.10"
+default-features = false
+
+[dev-dependencies.rand]
+version = "0.10"
+features = ["sys_rng"]
 default-features = false
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies.getrandom]
-version = "0.2"
-features = ["js"]
+version = "0.4"
+features = ["wasm_js"]
