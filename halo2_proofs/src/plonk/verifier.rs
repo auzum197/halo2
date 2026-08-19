@@ -436,7 +436,7 @@ mod tests {
         },
         transcript::{Blake2bRead, Blake2bWrite, Challenge255},
     };
-    use rand_core::OsRng;
+    use rand::rng;
 
     #[derive(Clone, Debug)]
     struct TestConfig {
@@ -533,7 +533,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(Vec::new());
-        create_proof(&params, &pk, &circuits, &instances, OsRng, &mut transcript)
+        create_proof(&params, &pk, &circuits, &instances, rng(), &mut transcript)
             .expect("proof generation should not fail");
         let proof = transcript.finalize();
 

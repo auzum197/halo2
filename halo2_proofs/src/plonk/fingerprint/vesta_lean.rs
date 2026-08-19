@@ -1319,7 +1319,7 @@ impl VerifyingKey<EqAffine> {
 
 #[cfg(test)]
 mod tests {
-    use group::prime::PrimeCurveAffine;
+    use group::CurveAffine;
 
     use super::*;
 

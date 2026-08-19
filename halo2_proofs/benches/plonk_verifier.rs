@@ -17,7 +17,7 @@ use halo2_proofs::{
     poly::commitment::Params,
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
-use rand_core::OsRng;
+use rand::rng;
 
 const K: u32 = 11;
 const NUM_INSTANCE_VALUES: usize = 9;
@@ -119,7 +119,7 @@ fn create_verification_case(
         .collect::<Vec<_>>();
 
     let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(Vec::new());
-    create_proof(params, pk, &circuits, &instances, OsRng, &mut transcript)
+    create_proof(params, pk, &circuits, &instances, rng(), &mut transcript)
         .expect("proof generation should not fail");
 
     VerificationCase {

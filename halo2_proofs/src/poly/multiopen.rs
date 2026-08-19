@@ -231,7 +231,7 @@ where
 #[test]
 fn test_roundtrip() {
     use group::Curve;
-    use rand_core::OsRng;
+    use rand::rng;
 
     use super::commitment::{Blind, Params};
     use crate::arithmetic::eval_polynomial;
@@ -242,7 +242,7 @@ fn test_roundtrip() {
 
     let params: Params<EqAffine> = Params::new(K);
     let domain = EvaluationDomain::new(1, K);
-    let rng = OsRng;
+    let mut rng = rng();
 
     let mut ax = domain.empty_coeff();
     for (i, a) in ax.iter_mut().enumerate() {
@@ -259,14 +259,14 @@ fn test_roundtrip() {
         *a = Fp::from(100 + i as u64);
     }
 
-    let blind = Blind(Fp::random(rng));
+    let blind = Blind(Fp::random(&mut rng));
 
     let a = params.commit(&ax, blind).to_affine();
     let b = params.commit(&bx, blind).to_affine();
     let c = params.commit(&cx, blind).to_affine();
 
-    let x = Fp::random(rng);
-    let y = Fp::random(rng);
+    let x = Fp::random(&mut rng);
+    let y = Fp::random(&mut rng);
     let avx = eval_polynomial(&ax, x);
     let bvx = eval_polynomial(&bx, x);
     let cvy = eval_polynomial(&cx, y);
@@ -344,7 +344,7 @@ fn test_roundtrip() {
 fn test_identical_queries() {
     use assert_matches::assert_matches;
     use group::Curve;
-    use rand_core::OsRng;
+    use rand::rng;
 
     use super::commitment::{Blind, Params};
     use crate::arithmetic::eval_polynomial;
@@ -355,7 +355,7 @@ fn test_identical_queries() {
 
     let params: Params<EqAffine> = Params::new(K);
     let domain = EvaluationDomain::new(1, K);
-    let rng = OsRng;
+    let mut rng = rng();
 
     let mut ax = domain.empty_coeff();
     for (i, a) in ax.iter_mut().enumerate() {
@@ -372,17 +372,17 @@ fn test_identical_queries() {
         *a = Fp::from(100 + i as u64);
     }
 
-    let blind = Blind(Fp::random(rng));
+    let blind = Blind(Fp::random(&mut rng));
 
     let a = params.commit(&ax, blind).to_affine();
     let b = params.commit(&bx, blind).to_affine();
     let c = params.commit(&cx, blind).to_affine();
 
-    let x = Fp::random(rng);
-    let y = Fp::random(rng);
+    let x = Fp::random(&mut rng);
+    let y = Fp::random(&mut rng);
     let avx = eval_polynomial(&ax, x);
     let bvx = eval_polynomial(&bx, x);
-    let bvx_bad = Fp::random(rng);
+    let bvx_bad = Fp::random(&mut rng);
     let cvy = eval_polynomial(&cx, y);
 
     let mut transcript = crate::transcript::Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
