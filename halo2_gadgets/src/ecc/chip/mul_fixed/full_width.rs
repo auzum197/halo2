@@ -185,7 +185,7 @@ pub mod tests {
         plonk::Error,
     };
     use pasta_curves::pallas;
-    use rand::rngs::OsRng;
+    use rand::rng;
 
     use crate::{
         ecc::{
@@ -235,7 +235,7 @@ pub mod tests {
 
         // [a]B
         {
-            let scalar_fixed = pallas::Scalar::random(OsRng);
+            let scalar_fixed = pallas::Scalar::random(&mut rng());
             let by = ScalarFixed::new(
                 chip.clone(),
                 layouter.namespace(|| "random a"),

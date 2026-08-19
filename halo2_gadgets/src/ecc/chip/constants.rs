@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn zs_and_us() {
-        let base = pallas::Point::random(rand::rngs::OsRng);
+        let base = pallas::Point::random(&mut rand::rng());
         let (z, u): (Vec<u64>, Vec<[pallas::Base; H]>) =
             find_zs_and_us(base.to_affine(), NUM_WINDOWS)
                 .unwrap()
