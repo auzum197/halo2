@@ -3,7 +3,7 @@ use group::{
     Curve, Group,
 };
 use pasta_curves::arithmetic::CurveAffine;
-use rand_core::OsRng;
+use rand::rngs::SysRng;
 use std::sync::Arc;
 
 use super::{validate_instances, verify_proof_with_instance_commitments, VerificationStrategy};
@@ -215,7 +215,7 @@ where
     /// Returns `false` if *some* proof was invalid. If the caller needs to identify
     /// specific failing proofs, it must re-process the proofs separately.
     ///
-    /// This uses [`OsRng`] internally instead of taking an `R: RngCore` argument, because
+    /// This uses [`SysRng`] internally instead of taking an `R: Rng` argument, because
     /// the internal parallelization requires access to a RNG that is guaranteed to not
     /// clone its internal state when shared between threads.
     pub fn finalize(self, params: &Params<C>, vk: &VerifyingKey<C>) -> bool {
@@ -257,7 +257,7 @@ where
                 let rho_i = if i == 0 {
                     C::Scalar::ONE
                 } else {
-                    C::Scalar::random(OsRng)
+                    C::Scalar::try_random(&mut SysRng).expect("system randomness must be available")
                 };
                 let strategy = BatchStrategy::new(params, rho_i);
                 let mut transcript = Blake2bRead::init(&item.proof[..]);

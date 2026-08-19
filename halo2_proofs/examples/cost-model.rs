@@ -26,7 +26,7 @@ impl fmt::Debug for Estimator {
 impl Estimator {
     fn random(k: usize) -> Self {
         let max_size = 1 << (k + 1);
-        let mut rng = rand_core::OsRng;
+        let mut rng = rand::rng();
 
         Estimator {
             multiexp_scalars: (0..max_size)

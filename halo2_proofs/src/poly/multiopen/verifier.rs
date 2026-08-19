@@ -226,7 +226,7 @@ impl<'a, 'b, C: CurveAffine> Query<C::Scalar> for VerifierQuery<'a, 'b, C> {
 mod tests {
     use assert_matches::assert_matches;
     use ff::Field;
-    use group::prime::PrimeCurveAffine;
+    use group::CurveAffine;
 
     use super::{
         compute_msm_eval, verify_proof, ChallengeX1, ChallengeX2, ChallengeX3, Error, Params,

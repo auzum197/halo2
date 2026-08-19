@@ -7,14 +7,16 @@ use crate::poly::commitment::Params;
 use criterion::{BenchmarkId, Criterion};
 use group::ff::Field;
 use halo2_proofs::*;
-use rand_core::OsRng;
+use rand::rng;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("msm");
     for k in 8..16 {
         group
             .bench_function(BenchmarkId::new("k", k), |b| {
-                let coeffs = (0..(1 << k)).map(|_| Fp::random(OsRng)).collect::<Vec<_>>();
+                let coeffs = (0..(1 << k))
+                    .map(|_| Fp::random(&mut rng()))
+                    .collect::<Vec<_>>();
                 let bases = Params::<EqAffine>::new(k).get_g();
 
                 b.iter(|| best_multiexp(&coeffs, &bases))

@@ -309,7 +309,7 @@ impl Rotation {
 mod tests {
     use ff::Field;
     use pasta_curves::pallas;
-    use rand_core::OsRng;
+    use rand::rng;
 
     use super::{EvaluationDomain, Rotation};
 
@@ -321,7 +321,7 @@ mod tests {
         // Create a random polynomial.
         let mut poly = domain.empty_lagrange();
         for coefficient in poly.iter_mut() {
-            *coefficient = pallas::Base::random(OsRng);
+            *coefficient = pallas::Base::random(&mut rng());
         }
 
         // Pick a chunk size that is guaranteed to not be a multiple of the polynomial

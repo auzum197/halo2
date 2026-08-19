@@ -16,7 +16,7 @@ use halo2_proofs::plonk::{
 use halo2_proofs::poly::commitment::{Guard, MSM};
 use halo2_proofs::poly::{commitment::Params, Rotation};
 use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, EncodedChallenge};
-use rand_core::OsRng;
+use rand::rng;
 use std::marker::PhantomData;
 
 #[test]
@@ -460,7 +460,7 @@ fn plonk_api() {
             &pk,
             &[circuit.clone(), circuit.clone()],
             &[&[&[instance]], &[&[instance]]],
-            OsRng,
+            rng(),
             &mut transcript,
         )
         .expect("proof generation should not fail");
@@ -494,7 +494,7 @@ fn plonk_api() {
             &pk,
             &[circuit.clone(), circuit.clone()],
             &[&[&[instance]], &[&[instance]]],
-            OsRng,
+            rng(),
             &mut transcript,
         )
         .expect("proof generation should not fail");

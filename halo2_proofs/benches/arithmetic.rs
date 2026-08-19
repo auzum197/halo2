@@ -8,10 +8,10 @@ use group::ff::Field;
 use halo2_proofs::*;
 
 use criterion::{black_box, Criterion};
-use rand_core::OsRng;
+use rand::rng;
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let rng = OsRng;
+    let mut rng = rng();
 
     // small multiexp
     {
@@ -20,8 +20,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         let len = g.len() / 2;
         let (g_lo, g_hi) = g.split_at_mut(len);
 
-        let coeff_1 = Fp::random(rng);
-        let coeff_2 = Fp::random(rng);
+        let coeff_1 = Fp::random(&mut rng);
+        let coeff_2 = Fp::random(&mut rng);
 
         c.bench_function("double-and-add", |b| {
             b.iter(|| {

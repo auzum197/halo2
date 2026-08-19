@@ -547,7 +547,7 @@ pub fn lagrange_interpolate<F: Field>(points: &[F], evals: &[F]) -> Vec<F> {
 }
 
 #[cfg(test)]
-use rand_core::OsRng;
+use rand::rng;
 
 #[cfg(test)]
 use crate::pasta::{Ep, EpAffine, Eq, EqAffine, Fp, Fq};
@@ -644,11 +644,11 @@ fn evaluate_booth_digits(bytes: &[u8], window_bits: usize) -> Fp {
 
 #[test]
 fn test_multiexp() {
-    let rng = OsRng;
+    let mut rng = rng();
     for len in [0, 1, 2, 3, 4, 31, 32, 33, 255, 256, 257] {
-        let coeffs = (0..len).map(|_| Fp::random(rng)).collect::<Vec<_>>();
+        let coeffs = (0..len).map(|_| Fp::random(&mut rng)).collect::<Vec<_>>();
         let bases = (0..len)
-            .map(|_| EqAffine::from(Eq::random(rng)))
+            .map(|_| EqAffine::from(Eq::random(&mut rng)))
             .collect::<Vec<_>>();
 
         assert_multiexp_matches_naive(&coeffs, &bases);
@@ -757,7 +757,7 @@ fn test_booth_digit_wide_representation() {
 
 #[test]
 fn test_multiexp_booth_boundaries() {
-    let rng = OsRng;
+    let mut rng = rng();
     let mut fp_high_bit = Fp::ONE;
     for _ in 0..254 {
         fp_high_bit = fp_high_bit.double();
@@ -774,7 +774,7 @@ fn test_multiexp_booth_boundaries() {
     ];
     let fp_coeffs = fp_scalars.into_iter().cycle().take(32).collect::<Vec<_>>();
     let fp_bases = (0..fp_coeffs.len())
-        .map(|_| EqAffine::from(Eq::random(rng)))
+        .map(|_| EqAffine::from(Eq::random(&mut rng)))
         .collect::<Vec<_>>();
     assert_multiexp_matches_naive(&fp_coeffs, &fp_bases);
 
@@ -794,7 +794,7 @@ fn test_multiexp_booth_boundaries() {
     ];
     let fq_coeffs = fq_scalars.into_iter().cycle().take(32).collect::<Vec<_>>();
     let fq_bases = (0..fq_coeffs.len())
-        .map(|_| EpAffine::from(Ep::random(rng)))
+        .map(|_| EpAffine::from(Ep::random(&mut rng)))
         .collect::<Vec<_>>();
     assert_multiexp_matches_naive(&fq_coeffs, &fq_bases);
 }
@@ -808,10 +808,10 @@ fn test_multiexp_algorithm_selection() {
 
 #[test]
 fn test_lagrange_interpolate() {
-    let rng = OsRng;
+    let mut rng = rng();
 
-    let points = (0..5).map(|_| Fp::random(rng)).collect::<Vec<_>>();
-    let evals = (0..5).map(|_| Fp::random(rng)).collect::<Vec<_>>();
+    let points = (0..5).map(|_| Fp::random(&mut rng)).collect::<Vec<_>>();
+    let evals = (0..5).map(|_| Fp::random(&mut rng)).collect::<Vec<_>>();
 
     for coeffs in 0..5 {
         let points = &points[0..coeffs];
