@@ -469,7 +469,7 @@ pub mod tests {
         plonk::Error,
     };
     use pasta_curves::pallas;
-    use rand::rngs::OsRng;
+    use rand::rng;
 
     use crate::{
         ecc::{
@@ -510,7 +510,7 @@ pub mod tests {
 
         // [a]B
         {
-            let scalar_val = pallas::Base::random(OsRng);
+            let scalar_val = pallas::Base::random(&mut rng());
             let (result, _) = {
                 let scalar = chip.load_private(
                     layouter.namespace(|| "random scalar"),

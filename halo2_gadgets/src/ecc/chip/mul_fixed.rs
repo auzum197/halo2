@@ -8,8 +8,7 @@ use std::marker::PhantomData;
 
 use group::{
     ff::{PrimeField, PrimeFieldBits},
-    prime::PrimeCurveAffine,
-    Curve, Group,
+    Curve, CurveAffine as _, Group,
 };
 use halo2_proofs::{
     circuit::{AssignedCell, Region, Value},
