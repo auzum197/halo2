@@ -40,11 +40,11 @@ version = "1"
 default-features = false
 
 [dependencies.ff]
-version = "0.13"
+version = "0.14"
 default-features = false
 
 [dependencies.group]
-version = "0.13"
+version = "0.14"
 
 [dependencies.pasta_curves]
 path = "../pasta_curves"
