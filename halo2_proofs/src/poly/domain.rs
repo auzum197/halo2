@@ -680,18 +680,18 @@ fn test_zero_padded_fft_matches_best_fft() {
 
 #[test]
 fn test_rotate() {
-    use rand_core::OsRng;
+    use rand::rng;
 
     use crate::arithmetic::eval_polynomial;
     use crate::pasta::pallas::Scalar;
 
     let domain = EvaluationDomain::<Scalar>::new(1, 3);
-    let rng = OsRng;
+    let mut rng = rng();
 
     let mut poly = domain.empty_lagrange();
     assert_eq!(poly.len(), 8);
     for value in poly.iter_mut() {
-        *value = Scalar::random(rng);
+        *value = Scalar::random(&mut rng);
     }
 
     let poly_rotated_cur = poly.rotate(Rotation::cur());
@@ -703,7 +703,7 @@ fn test_rotate() {
     let poly_rotated_next = domain.lagrange_to_coeff(poly_rotated_next);
     let poly_rotated_prev = domain.lagrange_to_coeff(poly_rotated_prev);
 
-    let x = Scalar::random(rng);
+    let x = Scalar::random(&mut rng);
 
     assert_eq!(
         eval_polynomial(&poly[..], x),
@@ -748,7 +748,7 @@ fn test_rotate_omega_fast_paths_match_exponentiation() {
 
 #[test]
 fn test_l_i() {
-    use rand_core::OsRng;
+    use rand::rng;
 
     use crate::arithmetic::{eval_polynomial, lagrange_interpolate};
     use crate::pasta::pallas::Scalar;
@@ -766,7 +766,7 @@ fn test_l_i() {
         l.push(l_i);
     }
 
-    let x = Scalar::random(OsRng);
+    let x = Scalar::random(&mut rng());
     let xn = x.pow([8, 0, 0, 0]);
 
     let evaluations = domain.l_i_range(x, xn, -7..=7);
@@ -779,7 +779,7 @@ fn test_l_i() {
 #[test]
 fn test_copy_rotated_chunk_extended() {
     use pasta_curves::pallas;
-    use rand_core::OsRng;
+    use rand::rng;
 
     let k = 11;
     let domain = EvaluationDomain::<pallas::Base>::new(3, k);
@@ -787,7 +787,7 @@ fn test_copy_rotated_chunk_extended() {
     // Create a random polynomial.
     let mut poly = domain.empty_extended();
     for coefficient in poly.iter_mut() {
-        *coefficient = pallas::Base::random(OsRng);
+        *coefficient = pallas::Base::random(&mut rng());
     }
 
     // Pick a chunk size that is guaranteed to not be a multiple of the polynomial

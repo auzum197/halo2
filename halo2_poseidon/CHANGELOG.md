@@ -8,6 +8,7 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+- Updated the field dependency to `ff 0.14`.
 - Forked from upstream `halo2_poseidon` and renamed to `zakura-halo2-poseidon`; this changelog starts
   fresh for the Zakura fork's initial release.
 - Restarted the version lineage at 1.0.0, leaving behind the inherited upstream

@@ -625,7 +625,7 @@ impl<C: CurveAffine, EccChip: EccInstructions<C>> FixedPointShort<C, EccChip> {
 #[cfg(test)]
 pub(crate) mod tests {
     use ff::PrimeField;
-    use group::{prime::PrimeCurveAffine, Curve, Group};
+    use group::{Curve, CurveAffine as _, Group};
     use std::marker::PhantomData;
 
     use halo2_proofs::{
@@ -854,7 +854,7 @@ pub(crate) mod tests {
             config.lookup_config.load_range_check_table(&mut layouter)?;
 
             // Generate a random non-identity point P
-            let p_val = pallas::Point::random(rand::rngs::OsRng).to_affine(); // P
+            let p_val = pallas::Point::random(&mut rand::rng()).to_affine(); // P
             let p = super::NonIdentityPoint::new(
                 chip.clone(),
                 layouter.namespace(|| "P"),
@@ -868,7 +868,7 @@ pub(crate) mod tests {
             )?;
 
             // Generate a random non-identity point Q
-            let q_val = pallas::Point::random(rand::rngs::OsRng).to_affine(); // Q
+            let q_val = pallas::Point::random(&mut rand::rng()).to_affine(); // Q
             let q = super::NonIdentityPoint::new(
                 chip.clone(),
                 layouter.namespace(|| "Q"),

@@ -604,7 +604,7 @@ mod tests {
         transcript::{Blake2bRead, Blake2bWrite, Challenge255},
     };
     use pasta_curves::{pallas, EqAffine};
-    use rand::rngs::OsRng;
+    use rand::rng;
 
     use super::{PoseidonInstructions, Pow5Chip, Pow5Config, StateWord};
     use crate::poseidon::{
@@ -813,9 +813,9 @@ mod tests {
 
     #[test]
     fn poseidon_hash() {
-        let rng = OsRng;
+        let mut rng = rng();
 
-        let message = [Fp::random(rng), Fp::random(rng)];
+        let message = [Fp::random(&mut rng), Fp::random(&mut rng)];
         let output =
             poseidon::Hash::<_, OrchardNullifier, ConstantLength<2>, 3, 2>::init().hash(message);
 
@@ -831,9 +831,13 @@ mod tests {
 
     #[test]
     fn poseidon_hash_longer_input() {
-        let rng = OsRng;
+        let mut rng = rng();
 
-        let message = [Fp::random(rng), Fp::random(rng), Fp::random(rng)];
+        let message = [
+            Fp::random(&mut rng),
+            Fp::random(&mut rng),
+            Fp::random(&mut rng),
+        ];
         let output =
             poseidon::Hash::<_, OrchardNullifier, ConstantLength<3>, 3, 2>::init().hash(message);
 
@@ -851,15 +855,7 @@ mod tests {
         let pk = plonk::keygen_pk(&params, vk, &circuit).unwrap();
 
         let mut transcript = Blake2bWrite::<_, EqAffine, _>::init(vec![]);
-        plonk::create_proof(
-            &params,
-            &pk,
-            &[circuit],
-            &[&[]],
-            &mut OsRng,
-            &mut transcript,
-        )
-        .unwrap();
+        plonk::create_proof(&params, &pk, &[circuit], &[&[]], &mut rng, &mut transcript).unwrap();
         let proof = transcript.finalize();
 
         let strategy = SingleVerifier::new(&params);
