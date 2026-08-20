@@ -226,7 +226,10 @@ default-features = false
 
 [dev-dependencies.rand]
 version = "0.10"
-features = ["sys_rng"]
+features = [
+    "sys_rng",
+    "thread_rng",
+]
 default-features = false
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies.getrandom]
