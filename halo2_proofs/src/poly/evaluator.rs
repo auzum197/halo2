@@ -1019,15 +1019,62 @@ fn plan_cost<E, F: Field, B: Basis>(plan: &EvaluationPlan<E, F, B>, two: F) -> (
     }
 }
 
-// Each cached polynomial occupies one chunk-sized buffer. Require enough
-// avoided multiplications to amortize storing and loading that buffer.
-const MIN_CSE_SAVED_MULTIPLICATIONS: usize = 3;
+// Each cached polynomial occupies one chunk-sized buffer. One avoided field
+// multiplication amortizes storing and loading that buffer; copy-only shapes
+// remain uncached.
+const MIN_CSE_SAVED_MULTIPLICATIONS: usize = 1;
 
 #[derive(Clone, Copy)]
 struct CacheAction {
     slot: usize,
     store: bool,
     end: usize,
+}
+
+// Reuses physical cache buffers whose traversal-order lifetimes do not
+// overlap. Cache stores and loads remain unchanged.
+fn reuse_cache_slots(actions: &mut [Option<CacheAction>], cache_slots: usize) -> usize {
+    let mut intervals = vec![(usize::MAX, 0); cache_slots];
+    for (occurrence, action) in actions.iter().enumerate() {
+        if let Some(action) = action {
+            let interval = &mut intervals[action.slot];
+            if action.store {
+                interval.0 = occurrence;
+            }
+            interval.1 = occurrence;
+        }
+    }
+
+    let mut order = (0..cache_slots).collect::<Vec<_>>();
+    order.sort_unstable_by_key(|slot| intervals[*slot].0);
+    let mut remap = vec![0; cache_slots];
+    let mut active = Vec::<(usize, usize)>::new();
+    let mut free = vec![];
+    let mut next_slot = 0;
+    for old_slot in order {
+        let (start, end) = intervals[old_slot];
+        let mut index = 0;
+        while index < active.len() {
+            if active[index].0 < start {
+                free.push(active.swap_remove(index).1);
+            } else {
+                index += 1;
+            }
+        }
+
+        let new_slot = free.pop().unwrap_or_else(|| {
+            let slot = next_slot;
+            next_slot += 1;
+            slot
+        });
+        remap[old_slot] = new_slot;
+        active.push((end, new_slot));
+    }
+
+    for action in actions.iter_mut().flatten() {
+        action.slot = remap[action.slot];
+    }
+    next_slot
 }
 
 struct RepeatShape {
@@ -1110,6 +1157,7 @@ impl<E: Copy, F: Field, B: Basis> EvaluationPlan<E, F, B> {
                     covered[occurrence..occurrences[occurrence].end].fill(true);
                 }
             }
+            let cache_slots = reuse_cache_slots(&mut actions, cache_slots);
             (actions, cache_slots)
         };
 
@@ -2103,9 +2151,9 @@ mod tests {
     use pasta_curves::{pallas, vesta};
 
     use super::{
-        compressed_selector, get_chunk_params, new_evaluator, selector_family_matches, Ast,
-        AstLeaf, BasisOps, DistributionWork, EvaluationPlan, Evaluator, FactorBodyPlan,
-        FactorBodyWork, FactorSide,
+        compressed_selector, get_chunk_params, new_evaluator, reuse_cache_slots,
+        selector_family_matches, Ast, AstLeaf, BasisOps, CacheAction, DistributionWork,
+        EvaluationPlan, Evaluator, FactorBodyPlan, FactorBodyWork, FactorSide,
     };
     use crate::poly::{Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff, Rotation};
 
@@ -2709,9 +2757,16 @@ mod tests {
         let mut plan = EvaluationPlan::compile(&ast);
         assert_eq!(plan.cache_common_subexpressions(), 1);
 
-        let mut below_threshold =
-            EvaluationPlan::compile(&Ast::distribute_powers(terms.into_iter().take(3), base));
-        assert_eq!(below_threshold.cache_common_subexpressions(), 0);
+        let mut single_saved_multiplication =
+            EvaluationPlan::compile(&Ast::distribute_powers(terms.into_iter().take(2), base));
+        assert_eq!(single_saved_multiplication.cache_common_subexpressions(), 1);
+
+        let repeated_copy = Ast::from(leaves[0]);
+        let mut copy_only = EvaluationPlan::compile(&Ast::distribute_powers(
+            [repeated_copy.clone(), repeated_copy],
+            base,
+        ));
+        assert_eq!(copy_only.cache_common_subexpressions(), 0);
 
         let actual = evaluator.evaluate(&ast, &domain);
         for row in 0..actual.len() {
@@ -2727,6 +2782,47 @@ mod tests {
     fn common_subexpressions_are_cached() {
         check_common_subexpressions_are_cached::<pallas::Base>();
         check_common_subexpressions_are_cached::<vesta::Base>();
+    }
+
+    #[test]
+    fn cache_slots_are_reused_after_their_last_load() {
+        let mut actions = vec![None; 6];
+        actions[0] = Some(CacheAction {
+            slot: 0,
+            store: true,
+            end: 1,
+        });
+        actions[1] = Some(CacheAction {
+            slot: 1,
+            store: true,
+            end: 2,
+        });
+        actions[2] = Some(CacheAction {
+            slot: 0,
+            store: false,
+            end: 3,
+        });
+        actions[3] = Some(CacheAction {
+            slot: 2,
+            store: true,
+            end: 4,
+        });
+        actions[4] = Some(CacheAction {
+            slot: 2,
+            store: false,
+            end: 5,
+        });
+        actions[5] = Some(CacheAction {
+            slot: 1,
+            store: false,
+            end: 6,
+        });
+
+        assert_eq!(reuse_cache_slots(&mut actions, 3), 2);
+        assert_eq!(actions[0].unwrap().slot, actions[2].unwrap().slot);
+        assert_eq!(actions[3].unwrap().slot, actions[4].unwrap().slot);
+        assert_eq!(actions[0].unwrap().slot, actions[3].unwrap().slot);
+        assert_ne!(actions[0].unwrap().slot, actions[1].unwrap().slot);
     }
 
     #[test]
