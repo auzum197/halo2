@@ -8,6 +8,7 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+- Prepared the `1.0.0-rc.3` release.
 - `Params::new` now normalizes its inverse curve FFT with parallel batched GLV
   scalar multiplication over the already-affine generators, reducing Orchard
   `k = 11` parameter generation by 7–9% on Apple aarch64.
