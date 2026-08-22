@@ -451,6 +451,10 @@ struct WeightedTerm<E, F: Field, B: Basis> {
 
 const MIN_HORNER_COEFFICIENTS: usize = 4;
 
+fn field_from_small_usize<F: Field>(value: usize) -> F {
+    (0..value).fold(F::ZERO, |accumulator, _| accumulator + F::ONE)
+}
+
 struct ExpandedPolynomial<'a, E, F: Field, B: Basis> {
     base: &'a Ast<E, F, B>,
     coefficients: Box<[AstLeaf<E, B>]>,
@@ -532,12 +536,14 @@ enum PowerFold<'a, F: Field> {
         accumulators: Vec<<pallas::Base as DeferredField>::Accumulator>,
         terms: Vec<F>,
         factors: Option<Vec<F>>,
+        addends: Option<Vec<F>>,
         output: &'a mut [F],
     },
     Vesta {
         accumulators: Vec<<vesta::Base as DeferredField>::Accumulator>,
         terms: Vec<F>,
         factors: Option<Vec<F>>,
+        addends: Option<Vec<F>>,
         output: &'a mut [F],
     },
 }
@@ -549,6 +555,7 @@ impl<'a, F: Field> PowerFold<'a, F> {
                 accumulators: vec![Default::default(); output.len()],
                 terms: vec![F::ZERO; output.len()],
                 factors: None,
+                addends: None,
                 output,
             }
         } else if TypeId::of::<F>() == TypeId::of::<vesta::Base>() {
@@ -556,6 +563,7 @@ impl<'a, F: Field> PowerFold<'a, F> {
                 accumulators: vec![Default::default(); output.len()],
                 terms: vec![F::ZERO; output.len()],
                 factors: None,
+                addends: None,
                 output,
             }
         } else {
@@ -587,6 +595,11 @@ impl<'a, F: Field> PowerFold<'a, F> {
     }
 
     fn accumulate(&mut self, power: F) {
+        if power == F::ONE {
+            self.accumulate_addends();
+            return;
+        }
+
         match self {
             Self::Eager {
                 accumulators,
@@ -607,6 +620,30 @@ impl<'a, F: Field> PowerFold<'a, F> {
                 terms,
                 ..
             } => accumulate_deferred::<vesta::Base>(accumulators, &*terms, &power),
+        }
+    }
+
+    fn accumulate_addends(&mut self) {
+        match self {
+            Self::Eager {
+                accumulators,
+                terms,
+                ..
+            } => {
+                for (accumulator, term) in accumulators.iter_mut().zip(terms.iter()) {
+                    *accumulator += term;
+                }
+            }
+            Self::Pallas { addends, terms, .. } | Self::Vesta { addends, terms, .. } => {
+                match addends {
+                    Some(addends) => {
+                        for (addend, term) in addends.iter_mut().zip(terms.iter()) {
+                            *addend += term;
+                        }
+                    }
+                    None => *addends = Some(terms.clone()),
+                }
+            }
         }
     }
 
@@ -662,18 +699,30 @@ impl<'a, F: Field> PowerFold<'a, F> {
             } => terms.copy_from_slice(&accumulators),
             Self::Pallas {
                 accumulators,
+                addends,
                 output,
                 ..
             } => {
-                let result = reduce_deferred::<pallas::Base, _>(accumulators);
+                let mut result = reduce_deferred::<pallas::Base, _>(accumulators);
+                if let Some(addends) = addends {
+                    for (result, addend) in result.iter_mut().zip(addends) {
+                        *result += addend;
+                    }
+                }
                 output.copy_from_slice(&result);
             }
             Self::Vesta {
                 accumulators,
+                addends,
                 output,
                 ..
             } => {
-                let result = reduce_deferred::<vesta::Base, _>(accumulators);
+                let mut result = reduce_deferred::<vesta::Base, _>(accumulators);
+                if let Some(addends) = addends {
+                    for (result, addend) in result.iter_mut().zip(addends) {
+                        *result += addend;
+                    }
+                }
                 output.copy_from_slice(&result);
             }
         }
@@ -1353,7 +1402,8 @@ impl<E: Copy, F: Field, B: Basis> DistributionWork<E, F, B> {
                     .max(bodies.required_scratch_slots())
             }
             Self::SelectorFamily { runs, .. } => {
-                // Prefixes and a suffix occupy `runs.len() + 1` slots.
+                // The selector product tree occupies at most one more slot
+                // than its leaves.
                 runs.len()
                     + 1
                     + runs
@@ -1482,68 +1532,123 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
             fold: &mut PowerFold<'_, F>,
         ) {
             let chunk_len = fold.terms().len();
-            let selector_slots = runs.len() + 1;
-            let (selector_scratch, body_scratch) = scratch.split_at_mut(selector_slots * chunk_len);
-            let (prefixes, suffix) = selector_scratch.split_at_mut(runs.len() * chunk_len);
-            B::copy_rotated_chunk(
+            let tree_slots = runs.len() + 1;
+            let (tree, body_scratch) = scratch.split_at_mut(tree_slots * chunk_len);
+
+            // Preserve the compiled cache traversal while placing each
+            // weighted body in selector-root order.
+            for run_index in (0..runs.len()).rev() {
+                let run = &runs[run_index];
+                let body_start = run_index * chunk_len;
+                let body = &mut tree[body_start..body_start + chunk_len];
+                recurse_factor_body(&run.bodies, base, ctx, body, cache, body_scratch);
+                for body in body.iter_mut() {
+                    *body *= run.power;
+                }
+            }
+
+            let query = leaf_chunk(query, ctx, chunk_len);
+            let paired_leaves = runs.len() / 2;
+            for pair in 0..paired_leaves {
+                let left_slot = pair * 2;
+                let right_slot = left_slot + 1;
+                let left_root = field_from_small_usize::<F>(left_slot + 1);
+                let right_root = field_from_small_usize::<F>(right_slot + 1);
+                let left_start = left_slot * chunk_len;
+                let right_start = right_slot * chunk_len;
+                let (left, right) = tree.split_at_mut(right_start);
+                let left = &mut left[left_start..left_start + chunk_len];
+                let right = &mut right[..chunk_len];
+                for ((product, sum), query) in
+                    left.iter_mut().zip(right.iter_mut()).zip(query.iter())
+                {
+                    let left_sum = *product;
+                    let right_sum = *sum;
+                    let left_factor = left_root - query;
+                    let right_factor = right_root - query;
+                    *product = left_factor * right_factor;
+                    *sum = left_sum * right_factor + right_sum * left_factor;
+                }
+            }
+
+            let mut active_nodes = paired_leaves;
+            if runs.len() % 2 == 1 {
+                let leaf_slot = runs.len() - 1;
+                let sum_slot = runs.len();
+                let leaf_start = leaf_slot * chunk_len;
+                let sum_start = sum_slot * chunk_len;
+                let (leaf, sum) = tree.split_at_mut(sum_start);
+                let leaf = &mut leaf[leaf_start..leaf_start + chunk_len];
+                let sum = &mut sum[..chunk_len];
+                let root = field_from_small_usize::<F>(runs.len());
+                for ((product, sum), query) in leaf.iter_mut().zip(sum.iter_mut()).zip(query.iter())
+                {
+                    *sum = *product;
+                    *product = root - query;
+                }
+                active_nodes += 1;
+            }
+
+            while active_nodes > 1 {
+                if active_nodes == 2 {
+                    for row in 0..chunk_len {
+                        let left_product = tree[row];
+                        let left_sum = tree[chunk_len + row];
+                        let right_product = tree[2 * chunk_len + row];
+                        let right_sum = tree[3 * chunk_len + row];
+                        tree[chunk_len + row] = left_sum * right_product + right_sum * left_product;
+                    }
+                    break;
+                }
+
+                let paired_nodes = active_nodes / 2;
+                for pair in 0..paired_nodes {
+                    let left_start = pair * 4 * chunk_len;
+                    let right_start = left_start + 2 * chunk_len;
+                    let output_start = pair * 2 * chunk_len;
+                    for row in 0..chunk_len {
+                        let left_product = tree[left_start + row];
+                        let left_sum = tree[left_start + chunk_len + row];
+                        let right_product = tree[right_start + row];
+                        let right_sum = tree[right_start + chunk_len + row];
+                        tree[output_start + row] = left_product * right_product;
+                        tree[output_start + chunk_len + row] =
+                            left_sum * right_product + right_sum * left_product;
+                    }
+                }
+
+                let mut next_nodes = paired_nodes;
+                if active_nodes % 2 == 1 {
+                    let input_start = (active_nodes - 1) * 2 * chunk_len;
+                    let output_start = paired_nodes * 2 * chunk_len;
+                    tree.copy_within(input_start..input_start + 2 * chunk_len, output_start);
+                    next_nodes += 1;
+                }
+                active_nodes = next_nodes;
+            }
+
+            let terms = fold.terms();
+            let sum = &tree[chunk_len..2 * chunk_len];
+            for ((term, sum), query) in terms.iter_mut().zip(sum.iter()).zip(query.iter()) {
+                *term = *sum * query;
+            }
+            fold.accumulate_addends();
+        }
+
+        fn leaf_chunk<'a, E, F: WithSmallOrderMulGroup<3>, B: BasisOps>(
+            leaf: &AstLeaf<E, B>,
+            ctx: &'a AstContext<'_, F, B>,
+            chunk_len: usize,
+        ) -> RotatedChunk<'a, F> {
+            let (first, second) = B::rotated_chunk(
                 ctx.domain,
                 ctx.chunk_size,
                 ctx.chunk_index,
-                &ctx.polys[query.index],
-                query.rotation,
-                &mut prefixes[..chunk_len],
+                &ctx.polys[leaf.index],
+                leaf.rotation,
+                chunk_len,
             );
-
-            let mut root = F::ONE;
-            // Prefix `r` is q * product(i - q) for roots i below r.
-            for index in 1..runs.len() {
-                let (previous, current) = prefixes.split_at_mut(index * chunk_len);
-                let query = &previous[..chunk_len];
-                let previous = &previous[previous.len() - chunk_len..];
-                let current = &mut current[..chunk_len];
-                for ((current, previous), query) in
-                    current.iter_mut().zip(previous.iter()).zip(query.iter())
-                {
-                    *current = *previous * (root - query);
-                }
-                root += F::ONE;
-            }
-
-            let mut has_suffix = false;
-            for (index, run) in runs.iter().enumerate().rev() {
-                {
-                    let selector = &mut prefixes[index * chunk_len..(index + 1) * chunk_len];
-                    if has_suffix {
-                        for (selector, suffix) in selector.iter_mut().zip(suffix.iter()) {
-                            *selector *= *suffix;
-                        }
-                    }
-
-                    {
-                        let terms = fold.terms();
-                        recurse_factor_body(&run.bodies, base, ctx, terms, cache, body_scratch);
-                        for (term, selector) in terms.iter_mut().zip(selector.iter()) {
-                            *term *= selector;
-                        }
-                    }
-                    fold.accumulate(run.power);
-                }
-
-                if index > 0 {
-                    let query = &prefixes[..chunk_len];
-                    if has_suffix {
-                        for (suffix, query) in suffix.iter_mut().zip(query.iter()) {
-                            *suffix *= root - query;
-                        }
-                    } else {
-                        for (suffix, query) in suffix.iter_mut().zip(query.iter()) {
-                            *suffix = root - query;
-                        }
-                        has_suffix = true;
-                    }
-                    root -= F::ONE;
-                }
-            }
+            RotatedChunk { first, second }
         }
 
         fn recurse_into<E, F: WithSmallOrderMulGroup<3>, B: BasisOps>(
@@ -1564,9 +1669,17 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
                 ),
                 EvaluationPlan::Add(a, b) => {
                     recurse_into(a, ctx, output, cache, scratch);
-                    let (rhs_values, rhs_scratch) = scratch.split_at_mut(output.len());
                     if let EvaluationPlan::Scale(negated_rhs, scalar) = b.as_ref() {
                         if *scalar == ctx.minus_one {
+                            if let EvaluationPlan::Poly(leaf) = negated_rhs.as_ref() {
+                                let chunk = leaf_chunk(leaf, ctx, output.len());
+                                for (lhs, rhs) in output.iter_mut().zip(chunk.iter()) {
+                                    *lhs -= *rhs;
+                                }
+                                return;
+                            }
+
+                            let (rhs_values, rhs_scratch) = scratch.split_at_mut(output.len());
                             recurse_into(negated_rhs, ctx, rhs_values, cache, rhs_scratch);
                             for (lhs, rhs) in output.iter_mut().zip(rhs_values.iter()) {
                                 *lhs -= *rhs;
@@ -1575,6 +1688,15 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
                         }
                     }
 
+                    if let EvaluationPlan::Poly(leaf) = b.as_ref() {
+                        let chunk = leaf_chunk(leaf, ctx, output.len());
+                        for (lhs, rhs) in output.iter_mut().zip(chunk.iter()) {
+                            *lhs += *rhs;
+                        }
+                        return;
+                    }
+
+                    let (rhs_values, rhs_scratch) = scratch.split_at_mut(output.len());
                     recurse_into(b, ctx, rhs_values, cache, rhs_scratch);
                     for (lhs, rhs) in output.iter_mut().zip(rhs_values.iter()) {
                         *lhs += *rhs;
@@ -1594,6 +1716,35 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
                         }
                     }
 
+                    if let (EvaluationPlan::Poly(lhs), EvaluationPlan::Poly(rhs)) =
+                        (a.as_ref(), b.as_ref())
+                    {
+                        let lhs = leaf_chunk(lhs, ctx, output.len());
+                        let rhs = leaf_chunk(rhs, ctx, output.len());
+                        for ((output, lhs), rhs) in
+                            output.iter_mut().zip(lhs.iter()).zip(rhs.iter())
+                        {
+                            *output = *lhs * rhs;
+                        }
+                        return;
+                    }
+                    if let EvaluationPlan::Poly(rhs) = b.as_ref() {
+                        recurse_into(a, ctx, output, cache, scratch);
+                        let rhs = leaf_chunk(rhs, ctx, output.len());
+                        for (lhs, rhs) in output.iter_mut().zip(rhs.iter()) {
+                            *lhs *= rhs;
+                        }
+                        return;
+                    }
+                    if let EvaluationPlan::Poly(lhs) = a.as_ref() {
+                        recurse_into(b, ctx, output, cache, scratch);
+                        let lhs = leaf_chunk(lhs, ctx, output.len());
+                        for (rhs, lhs) in output.iter_mut().zip(lhs.iter()) {
+                            *rhs *= lhs;
+                        }
+                        return;
+                    }
+
                     recurse_into(a, ctx, output, cache, scratch);
                     let (rhs, rhs_scratch) = scratch.split_at_mut(output.len());
                     recurse_into(b, ctx, rhs, cache, rhs_scratch);
@@ -1602,12 +1753,26 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
                     }
                 }
                 EvaluationPlan::Square(inner) => {
+                    if let EvaluationPlan::Poly(leaf) = inner.as_ref() {
+                        let chunk = leaf_chunk(leaf, ctx, output.len());
+                        for (output, value) in output.iter_mut().zip(chunk.iter()) {
+                            *output = value.square();
+                        }
+                        return;
+                    }
                     recurse_into(inner, ctx, output, cache, scratch);
                     for value in output.iter_mut() {
                         *value = value.square();
                     }
                 }
                 EvaluationPlan::Scale(a, scalar) => {
+                    if let EvaluationPlan::Poly(leaf) = a.as_ref() {
+                        let chunk = leaf_chunk(leaf, ctx, output.len());
+                        for (output, value) in output.iter_mut().zip(chunk.iter()) {
+                            *output = *value * scalar;
+                        }
+                        return;
+                    }
                     if !recurse_small_scale_into(a, *scalar, ctx, output, cache, scratch) {
                         recurse_into(a, ctx, output, cache, scratch);
                         for lhs in output.iter_mut() {
@@ -1630,21 +1795,12 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
 
                     let (base_values, scratch) = scratch.split_at_mut(output.len());
                     recurse_into(base, ctx, base_values, cache, scratch);
-                    let (coefficient_values, _) = scratch.split_at_mut(output.len());
                     for coefficient in remaining.iter().rev() {
                         for (value, base) in output.iter_mut().zip(base_values.iter()) {
                             *value *= base;
                         }
-                        B::copy_rotated_chunk(
-                            ctx.domain,
-                            ctx.chunk_size,
-                            ctx.chunk_index,
-                            &ctx.polys[coefficient.index],
-                            coefficient.rotation,
-                            coefficient_values,
-                        );
-                        for (value, coefficient) in output.iter_mut().zip(coefficient_values.iter())
-                        {
+                        let coefficient = leaf_chunk(coefficient, ctx, output.len());
+                        for (value, coefficient) in output.iter_mut().zip(coefficient.iter()) {
                             *value += coefficient;
                         }
                     }
@@ -2000,7 +2156,71 @@ pub(crate) trait BasisOps: Basis {
         poly: &Polynomial<F, Self>,
         rotation: Rotation,
         output: &mut [F],
-    );
+    ) {
+        let (first_values, second_values) = Self::rotated_chunk(
+            domain,
+            chunk_size,
+            chunk_index,
+            poly,
+            rotation,
+            output.len(),
+        );
+        let (first, second) = output.split_at_mut(first_values.len());
+        first.copy_from_slice(first_values);
+        second.copy_from_slice(second_values);
+    }
+    fn rotated_chunk<'a, F: WithSmallOrderMulGroup<3>>(
+        domain: &EvaluationDomain<F>,
+        chunk_size: usize,
+        chunk_index: usize,
+        poly: &'a Polynomial<F, Self>,
+        rotation: Rotation,
+        chunk_len: usize,
+    ) -> (&'a [F], &'a [F]);
+}
+
+struct RotatedChunk<'a, F> {
+    first: &'a [F],
+    second: &'a [F],
+}
+
+impl<'a, F: Copy> RotatedChunk<'a, F> {
+    fn new(
+        values: &'a [F],
+        rotation_is_negative: bool,
+        rotation_abs: usize,
+        chunk_size: usize,
+        chunk_index: usize,
+        chunk_len: usize,
+    ) -> Self {
+        assert!(rotation_abs <= values.len());
+
+        let mid = if rotation_is_negative {
+            values.len() - rotation_abs
+        } else {
+            rotation_abs
+        };
+        let unwrapped_start = mid + chunk_size * chunk_index;
+        let source_start = if unwrapped_start >= values.len() {
+            unwrapped_start - values.len()
+        } else {
+            unwrapped_start
+        };
+
+        let first_len = chunk_len.min(values.len() - source_start);
+        Self {
+            first: &values[source_start..source_start + first_len],
+            second: &values[..chunk_len - first_len],
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &'a F> {
+        self.first.iter().chain(self.second)
+    }
+
+    fn into_slices(self) -> (&'a [F], &'a [F]) {
+        (self.first, self.second)
+    }
 }
 
 impl BasisOps for Coeff {
@@ -2040,14 +2260,14 @@ impl BasisOps for Coeff {
         }
     }
 
-    fn copy_rotated_chunk<F: WithSmallOrderMulGroup<3>>(
+    fn rotated_chunk<'a, F: WithSmallOrderMulGroup<3>>(
         _: &EvaluationDomain<F>,
         _: usize,
         _: usize,
-        _: &Polynomial<F, Self>,
+        _: &'a Polynomial<F, Self>,
         _: Rotation,
-        _: &mut [F],
-    ) {
+        _: usize,
+    ) -> (&'a [F], &'a [F]) {
         panic!("Can't rotate polynomials in the standard basis")
     }
 }
@@ -2080,15 +2300,23 @@ impl BasisOps for LagrangeCoeff {
         }
     }
 
-    fn copy_rotated_chunk<F: WithSmallOrderMulGroup<3>>(
+    fn rotated_chunk<'a, F: WithSmallOrderMulGroup<3>>(
         _: &EvaluationDomain<F>,
         chunk_size: usize,
         chunk_index: usize,
-        poly: &Polynomial<F, Self>,
+        poly: &'a Polynomial<F, Self>,
         rotation: Rotation,
-        output: &mut [F],
-    ) {
-        poly.copy_rotated_chunk(rotation, chunk_size, chunk_index, output)
+        chunk_len: usize,
+    ) -> (&'a [F], &'a [F]) {
+        RotatedChunk::new(
+            &poly.values,
+            rotation.0 < 0,
+            rotation.0.unsigned_abs() as usize,
+            chunk_size,
+            chunk_index,
+            chunk_len,
+        )
+        .into_slices()
     }
 }
 
@@ -2120,14 +2348,14 @@ impl BasisOps for ExtendedLagrangeCoeff {
         }
     }
 
-    fn copy_rotated_chunk<F: WithSmallOrderMulGroup<3>>(
+    fn rotated_chunk<'a, F: WithSmallOrderMulGroup<3>>(
         domain: &EvaluationDomain<F>,
         chunk_size: usize,
         chunk_index: usize,
-        poly: &Polynomial<F, Self>,
+        poly: &'a Polynomial<F, Self>,
         rotation: Rotation,
-        output: &mut [F],
-    ) {
+        chunk_len: usize,
+    ) -> (&'a [F], &'a [F]) {
         let rotation_scale = domain.get_quotient_poly_degree().next_power_of_two();
         debug_assert_eq!(poly.len() % rotation_scale, 0);
         let rotation_period = poly.len() / rotation_scale;
@@ -2135,13 +2363,15 @@ impl BasisOps for ExtendedLagrangeCoeff {
             .expect("rotation magnitude fits in usize")
             % rotation_period)
             * rotation_scale;
-        poly.copy_rotated_chunk_helper(
+        RotatedChunk::new(
+            &poly.values,
             rotation.0 < 0,
             rotation_abs,
             chunk_size,
             chunk_index,
-            output,
+            chunk_len,
         )
+        .into_slices()
     }
 }
 
@@ -3406,9 +3636,61 @@ mod tests {
         assert!(compressed_selector(&non_selector, -F::ONE).is_none());
     }
 
+    fn check_orchard_selector_family_lengths<F>()
+    where
+        F: WithSmallOrderMulGroup<3> + From<u64>,
+    {
+        let domain = EvaluationDomain::new(3, 3);
+        let mut query_poly = domain.empty_extended();
+        let mut body_poly = domain.empty_extended();
+        for (row, (query, body)) in query_poly.iter_mut().zip(body_poly.iter_mut()).enumerate() {
+            *query = F::from((row % 11 + 1) as u64);
+            *body = F::from((row * 7 + 3) as u64);
+        }
+
+        let mut evaluator = new_evaluator::<_, F, ExtendedLagrangeCoeff>(|| {});
+        let query = evaluator.register_poly(query_poly);
+        let body = evaluator.register_poly(body_poly);
+
+        // Orchard has compressed-selector families of lengths 4, 5, 6,
+        // and 7. Exercise every product-tree shape used by the circuit.
+        for combination_len in 4..=7 {
+            let terms = (1..=combination_len)
+                .map(|assigned_root| {
+                    compressed_selector_expression(query, combination_len, assigned_root)
+                        * Ast::from(body)
+                })
+                .collect::<Vec<_>>();
+            let control_terms = (1..=combination_len)
+                .map(|assigned_root| {
+                    (compressed_selector_expression(query, combination_len, assigned_root)
+                        * Ast::ConstantTerm(F::ONE))
+                        * Ast::from(body)
+                })
+                .collect::<Vec<_>>();
+
+            let families = selector_family_matches(&terms, -F::ONE);
+            assert_eq!(families.len(), 1);
+            assert_eq!(families[0].combination_len, combination_len);
+            assert!(selector_family_matches(&control_terms, -F::ONE).is_empty());
+
+            for base in [F::ZERO, F::ONE, F::from(19)] {
+                let candidate =
+                    evaluator.evaluate(&Ast::distribute_powers(terms.clone(), base), &domain);
+                let control = evaluator.evaluate(
+                    &Ast::distribute_powers(control_terms.clone(), base),
+                    &domain,
+                );
+                assert_eq!(&candidate[..], &control[..]);
+            }
+        }
+    }
+
     #[test]
     fn compressed_selector_families_match_generic_evaluation() {
         check_compressed_selector_families::<pallas::Base>();
         check_compressed_selector_families::<vesta::Base>();
+        check_orchard_selector_family_lengths::<pallas::Base>();
+        check_orchard_selector_family_lengths::<vesta::Base>();
     }
 }
