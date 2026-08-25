@@ -1,6 +1,7 @@
 use std::fmt;
 
 use ff::Field;
+use maybe_rayon::prelude::*;
 
 use crate::{
     circuit::{
@@ -76,23 +77,37 @@ impl FloorPlanner for V1 {
         Self::assign(cs, circuit, config, &layout)
     }
 
-    fn synthesize_batch<F: Field, CS: Assignment<F>, C: Circuit<F>>(
+    fn synthesize_batch<F: Field, CS: Assignment<F> + Send, C: Circuit<F> + Sync>(
         assignments: &mut [CS],
         circuits: &[C],
         config: C::Config,
         constants: &[Column<Fixed>],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        C::Config: Send,
+    {
         debug_assert_eq!(assignments.len(), circuits.len());
         let Some(first_circuit) = circuits.first() else {
             return Ok(());
         };
 
         let layout = Self::plan::<F, CS, C>(first_circuit, config.clone(), constants)?;
-        for (assignment, circuit) in assignments.iter_mut().zip(circuits) {
-            Self::assign(assignment, circuit, config.clone(), &layout)?;
+        if circuits.len() == 1 {
+            return Self::assign(&mut assignments[0], first_circuit, config, &layout);
         }
 
-        Ok(())
+        // Workers share the immutable layout; each one owns its assignment
+        // target and a clone of the configuration.
+        let configs = (0..circuits.len())
+            .map(|_| config.clone())
+            .collect::<Vec<_>>();
+        assignments
+            .into_par_iter()
+            .zip(circuits.into_par_iter())
+            .zip(configs.into_par_iter())
+            .try_for_each(|((assignment, circuit), config)| {
+                Self::assign(assignment, circuit, config, &layout)
+            })
     }
 }
 

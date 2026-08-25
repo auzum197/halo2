@@ -15,6 +15,9 @@ and this project adheres to Rust's notion of
   - `EccInstructions::witness_point_non_id_from_constant`
   - `NonIdentityPoint::new_from_constant`
 
+- Internal proof-test helpers and benchmarks satisfy the `Sync` circuit /
+  `Send` configuration bounds that `zakura-halo2-proofs`'s `create_proof` now
+  requires; public gadget APIs are unchanged.
 - Poseidon, Sinsemilla, and ECC witness generation now use direct small-power,
   doubling, and word-extraction paths instead of generic exponentiation,
   multiplication by two, and intermediate allocations.
