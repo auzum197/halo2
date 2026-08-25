@@ -15,6 +15,8 @@ and this project adheres to Rust's notion of
   - `EccInstructions::witness_point_non_id_from_constant`
   - `NonIdentityPoint::new_from_constant`
 
+- Field-element bit-range witnesses are reconstructed in 64-bit chunks instead
+  of one bit at a time.
 - Internal proof-test helpers and benchmarks satisfy the `Sync` circuit /
   `Send` configuration bounds that `zakura-halo2-proofs`'s `create_proof` now
   requires; public gadget APIs are unchanged.
