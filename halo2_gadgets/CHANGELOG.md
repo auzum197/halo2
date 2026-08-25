@@ -15,6 +15,10 @@ and this project adheres to Rust's notion of
   - `EccInstructions::witness_point_non_id_from_constant`
   - `NonIdentityPoint::new_from_constant`
 
+- Public-initialized Sinsemilla hashing now derives its existing affine
+  witnesses from a compact Jacobian accumulator that caches its squared
+  projective denominator, reducing witness-generation work without changing
+  the circuit layout.
 - Field-element bit-range witnesses are reconstructed in 64-bit chunks instead
   of one bit at a time.
 - Internal proof-test helpers and benchmarks satisfy the `Sync` circuit /
