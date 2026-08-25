@@ -471,12 +471,19 @@ pub trait FloorPlanner {
     /// a caller bug (`create_proof` guarantees it), so this is debug-asserted
     /// rather than reported through [`Error`], whose variants describe
     /// circuit failures.
-    fn synthesize_batch<F: Field, CS: Assignment<F>, C: Circuit<F>>(
+    ///
+    /// The `Send` and `Sync` bounds let implementations synthesize the
+    /// independent circuit witnesses in parallel; the default implementation
+    /// is serial.
+    fn synthesize_batch<F: Field, CS: Assignment<F> + Send, C: Circuit<F> + Sync>(
         assignments: &mut [CS],
         circuits: &[C],
         config: C::Config,
         constants: &[Column<Fixed>],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        C::Config: Send,
+    {
         debug_assert_eq!(assignments.len(), circuits.len());
 
         for (assignment, circuit) in assignments.iter_mut().zip(circuits) {
