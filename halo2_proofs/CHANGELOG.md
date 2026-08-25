@@ -8,6 +8,9 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+- IPA opening proofs now compute independent round terms in parallel and fuse
+  the blinding and value terms into each round commitment's multiscalar
+  multiplication.
 - Public-instance commitments and polynomial transforms for independent proof
   circuits are now prepared in parallel when multicore support is enabled,
   while retaining transcript order.
