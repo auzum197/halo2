@@ -27,6 +27,9 @@ and this project adheres to Rust's notion of
 ### Changed
 - The minimum supported Rust version is now 1.88.
 
+- Batch verification now merges arbitrary final-MSM terms in a contiguous
+  buffer and canonicalizes them once, while retaining positional accumulation
+  for the IPA generator coefficients.
 - Multi-opening proofs now collapse polynomials in place, avoiding per-query
   polynomial allocations and separate multiplication and addition passes.
 - The V1 floor planner now caches consecutive region-column writes, avoiding
