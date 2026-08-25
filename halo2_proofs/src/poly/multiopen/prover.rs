@@ -8,45 +8,202 @@ use super::{
 };
 
 use crate::arithmetic::{eval_polynomial, kate_division, CurveAffine};
+use crate::multicore;
 use crate::transcript::{EncodedChallenge, TranscriptWrite};
 
 use ff::Field;
 use group::Curve;
+use pasta_curves::{deferred::DeferredField, pallas, vesta};
 use rand_core::Rng;
+use std::any::{Any, TypeId};
 use std::hash::Hash;
 use std::io;
 use std::marker::PhantomData;
+
+// Amortize task scheduling over at least this many field multiply-adds per
+// worker.
+const MIN_PARALLEL_FOLDS_PER_THREAD: usize = 1 << 10;
+
+fn fold_polynomial_range<F: Field>(
+    values: &mut [F],
+    start: usize,
+    polynomials: &[&Polynomial<F, Coeff>],
+    challenge: F,
+) {
+    for polynomial in polynomials {
+        let common_len = polynomial
+            .values
+            .len()
+            .saturating_sub(start)
+            .min(values.len());
+        if common_len > 0 {
+            for (value, coefficient) in values[..common_len]
+                .iter_mut()
+                .zip(&polynomial.values[start..start + common_len])
+            {
+                *value *= challenge;
+                *value += coefficient;
+            }
+        }
+        for value in &mut values[common_len..] {
+            *value *= challenge;
+        }
+    }
+}
+
+fn fold_polynomial_range_deferred<F: DeferredField>(
+    values: &mut [F],
+    start: usize,
+    polynomials: &[&Polynomial<F, Coeff>],
+    powers: &[F],
+) {
+    debug_assert!(polynomials.len() > 2);
+    debug_assert!(powers.len() >= polynomials.len());
+
+    let (last, products) = polynomials
+        .split_last()
+        .expect("point-set group is nonempty");
+    for (offset, value) in values.iter_mut().enumerate() {
+        let coefficient_index = start + offset;
+        let mut accumulator = F::Accumulator::default();
+        for (polynomial_index, polynomial) in products.iter().enumerate() {
+            if let Some(coefficient) = polynomial.values.get(coefficient_index) {
+                let exponent = polynomials.len() - 1 - polynomial_index;
+                F::mul_accumulate(&mut accumulator, coefficient, &powers[exponent]);
+            }
+        }
+
+        *value = F::reduce(accumulator);
+        if let Some(coefficient) = last.values.get(coefficient_index) {
+            *value += coefficient;
+        }
+    }
+}
+
+fn collapse_polynomials_with<F: Field>(
+    groups: &[Vec<&Polynomial<F, Coeff>>],
+    fold_range: impl Fn(&mut [F], usize, &[&Polynomial<F, Coeff>]) + Copy + Send + Sync,
+) -> Vec<Polynomial<F, Coeff>> {
+    let mut collapsed = groups
+        .iter()
+        .map(|group| {
+            let first = group.first().expect("point-set group is nonempty");
+            Polynomial {
+                values: first.values.clone(),
+                _marker: PhantomData,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let total_work = collapsed
+        .iter()
+        .zip(groups)
+        .map(|(polynomial, group)| {
+            polynomial
+                .values
+                .len()
+                .saturating_mul(group.len().saturating_sub(1))
+        })
+        .sum::<usize>();
+    let thread_count = multicore::current_num_threads();
+    if thread_count == 1 || total_work.div_ceil(thread_count) < MIN_PARALLEL_FOLDS_PER_THREAD {
+        for (polynomial, group) in collapsed.iter_mut().zip(groups) {
+            fold_range(&mut polynomial.values, 0, group);
+        }
+        return collapsed;
+    }
+    let work_per_task = total_work.div_ceil(thread_count);
+
+    multicore::scope(|scope| {
+        for (polynomial, group) in collapsed.iter_mut().zip(groups) {
+            let folds_per_coefficient = group.len().saturating_sub(1);
+            if folds_per_coefficient == 0 {
+                continue;
+            }
+            let chunk_size = work_per_task.div_ceil(folds_per_coefficient);
+            for (chunk_index, values) in polynomial.values.chunks_mut(chunk_size).enumerate() {
+                let start = chunk_index * chunk_size;
+                scope.spawn(move |_| fold_range(values, start, group));
+            }
+        }
+    });
+
+    collapsed
+}
+
+fn collapse_polynomials_horner<F: Field>(
+    groups: &[Vec<&Polynomial<F, Coeff>>],
+    challenge: F,
+) -> Vec<Polynomial<F, Coeff>> {
+    collapse_polynomials_with(groups, |values, start, group| {
+        fold_polynomial_range(values, start, &group[1..], challenge);
+    })
+}
+
+fn collapse_polynomials_deferred<F: DeferredField>(
+    groups: &[Vec<&Polynomial<F, Coeff>>],
+    challenge: F,
+) -> Vec<Polynomial<F, Coeff>> {
+    if multicore::current_num_threads() > 1 {
+        return collapse_polynomials_horner(groups, challenge);
+    }
+
+    let max_group_len = groups.iter().map(Vec::len).max().unwrap_or(0);
+    let mut powers = Vec::with_capacity(max_group_len);
+    if max_group_len > 0 {
+        powers.push(F::ONE);
+        for exponent in 1..max_group_len {
+            powers.push(powers[exponent - 1] * challenge);
+        }
+    }
+
+    collapse_polynomials_with(groups, |values, start, group| {
+        if group.len() <= 2 {
+            fold_polynomial_range(values, start, &group[1..], challenge);
+        } else {
+            fold_polynomial_range_deferred(values, start, group, &powers);
+        }
+    })
+}
+
+fn collapse_polynomials_pasta<F: Field, T: DeferredField + 'static>(
+    groups: &[Vec<&Polynomial<F, Coeff>>],
+    challenge: F,
+) -> Vec<Polynomial<F, Coeff>> {
+    let challenge = *(&challenge as &dyn Any)
+        .downcast_ref::<T>()
+        .expect("the challenge field was checked before conversion");
+    let groups = groups
+        .iter()
+        .map(|group| {
+            group
+                .iter()
+                .map(|polynomial| {
+                    (*polynomial as &dyn Any)
+                        .downcast_ref::<Polynomial<T, Coeff>>()
+                        .expect("the polynomial field matches the challenge field")
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    let collapsed: Box<dyn Any> = Box::new(collapse_polynomials_deferred(&groups, challenge));
+    *collapsed
+        .downcast::<Vec<Polynomial<F, Coeff>>>()
+        .expect("the output polynomial field matches the input field")
+}
 
 fn collapse_polynomials<F: Field>(
     groups: &[Vec<&Polynomial<F, Coeff>>],
     challenge: F,
 ) -> Vec<Polynomial<F, Coeff>> {
-    groups
-        .iter()
-        .map(|group| {
-            let first = group.first().expect("point-set group is nonempty");
-            let mut values = first.values.clone();
-
-            for polynomial in &group[1..] {
-                let common_len = values.len().min(polynomial.values.len());
-                for (value, coefficient) in values[..common_len]
-                    .iter_mut()
-                    .zip(&polynomial.values[..common_len])
-                {
-                    *value *= challenge;
-                    *value += coefficient;
-                }
-                for value in &mut values[common_len..] {
-                    *value *= challenge;
-                }
-            }
-
-            Polynomial {
-                values,
-                _marker: PhantomData,
-            }
-        })
-        .collect()
+    if TypeId::of::<F>() == TypeId::of::<pallas::Base>() {
+        collapse_polynomials_pasta::<F, pallas::Base>(groups, challenge)
+    } else if TypeId::of::<F>() == TypeId::of::<vesta::Base>() {
+        collapse_polynomials_pasta::<F, vesta::Base>(groups, challenge)
+    } else {
+        collapse_polynomials_horner(groups, challenge)
+    }
 }
 
 /// Create a multi-opening proof.
@@ -181,9 +338,10 @@ impl<'a, C: CurveAffine> Query<C::Scalar> for ProverQuery<'a, C> {
 
 #[cfg(test)]
 mod tests {
-    use super::{collapse_polynomials, Coeff, Polynomial};
+    use super::{collapse_polynomials, Coeff, Polynomial, MIN_PARALLEL_FOLDS_PER_THREAD};
     use ff::Field;
-    use pasta_curves::Fp;
+    use pasta_curves::{Fp, Fq};
+    use std::fmt::Debug;
     use std::marker::PhantomData;
 
     fn reference_collapse<F: Field>(
@@ -202,9 +360,16 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn streaming_collapse_matches_operator_collapse() {
-        let lengths = [vec![8, 5, 10], vec![3], vec![6, 9]];
+    fn streaming_collapse_matches_operator_collapse<F>()
+    where
+        F: Field + From<u64> + Debug,
+    {
+        let long = MIN_PARALLEL_FOLDS_PER_THREAD * 2;
+        let lengths = [
+            vec![long, long - 1, long + 1, long, long],
+            vec![3],
+            vec![6, 9],
+        ];
         let groups = lengths
             .iter()
             .enumerate()
@@ -215,7 +380,7 @@ mod tests {
                     .map(|(polynomial_index, length)| Polynomial {
                         values: (0..*length)
                             .map(|coefficient_index| {
-                                Fp::from(
+                                F::from(
                                     100 * group_index as u64
                                         + 10 * polynomial_index as u64
                                         + coefficient_index as u64,
@@ -232,12 +397,35 @@ mod tests {
             .map(|group| group.iter().collect::<Vec<_>>())
             .collect::<Vec<_>>();
 
-        let challenge = Fp::from(17);
-        let expected = reference_collapse(&group_refs, challenge);
-        let actual = collapse_polynomials(&group_refs, challenge);
+        for challenge in [F::ZERO, F::ONE, -F::ONE, F::from(17)] {
+            let expected = reference_collapse(&group_refs, challenge);
+            let check = || {
+                let actual = collapse_polynomials(&group_refs, challenge);
+                for (expected, actual) in expected.iter().zip(&actual) {
+                    assert_eq!(&expected[..], &actual[..]);
+                }
+            };
 
-        for (expected, actual) in expected.iter().zip(&actual) {
-            assert_eq!(&expected[..], &actual[..]);
+            #[cfg(feature = "multicore")]
+            for thread_count in [1, 4] {
+                maybe_rayon::ThreadPoolBuilder::new()
+                    .num_threads(thread_count)
+                    .build()
+                    .unwrap()
+                    .install(&check);
+            }
+            #[cfg(not(feature = "multicore"))]
+            check();
         }
+    }
+
+    #[test]
+    fn streaming_collapse_matches_operator_collapse_fp() {
+        streaming_collapse_matches_operator_collapse::<Fp>();
+    }
+
+    #[test]
+    fn streaming_collapse_matches_operator_collapse_fq() {
+        streaming_collapse_matches_operator_collapse::<Fq>();
     }
 }
