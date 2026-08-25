@@ -27,6 +27,9 @@ and this project adheres to Rust's notion of
 ### Changed
 - The minimum supported Rust version is now 1.88.
 
+- The V1 floor planner now measures and positions a circuit once when creating
+  a proof for several instances of that circuit, then reuses the layout for
+  each witness assignment.
 - Polynomial evaluation now indexes common-subexpression candidates by
   structural fingerprints, avoiding quadratic candidate scans while retaining
   exact structural matching.
