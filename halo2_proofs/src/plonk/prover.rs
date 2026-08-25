@@ -149,12 +149,16 @@ impl<'a, F: Field> Assignment<F> for WitnessCollection<'a, F> {
 ///
 /// Every element of `circuits` must have the circuit shape used to generate
 /// `pk`.
+///
+/// The circuit type must be `Sync` and its configuration `Send` so that
+/// compatible floor planners can synthesize independent circuit witnesses in
+/// parallel.
 pub fn create_proof<
     C: CurveAffine,
     E: EncodedChallenge<C>,
     R: Rng,
     T: TranscriptWrite<C, E>,
-    ConcreteCircuit: Circuit<C::Scalar>,
+    ConcreteCircuit: Circuit<C::ScalarExt> + Sync,
 >(
     params: &Params<C>,
     pk: &ProvingKey<C>,
@@ -162,7 +166,10 @@ pub fn create_proof<
     instances: &[&[&[C::Scalar]]],
     mut rng: R,
     transcript: &mut T,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+    <ConcreteCircuit as Circuit<C::ScalarExt>>::Config: Send,
+{
     if circuits.len() != instances.len() {
         return Err(Error::InvalidInstances);
     }
@@ -842,10 +849,11 @@ fn v1_batch_reuses_measurement() {
         transcript::{Blake2bWrite, Challenge255},
     };
     use pasta_curves::EqAffine;
-    use rand::rng;
+    use rand::{rngs::StdRng, SeedableRng};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static MEASUREMENTS: AtomicUsize = AtomicUsize::new(0);
+    const PROOF_SEED: u64 = 0x5631_4241_5443_4802;
 
     #[derive(Clone, Copy)]
     struct MyCircuit;
@@ -881,9 +889,39 @@ fn v1_batch_reuses_measurement() {
         &pk,
         &[MyCircuit, MyCircuit, MyCircuit],
         &[&[], &[], &[]],
-        rng(),
+        StdRng::seed_from_u64(PROOF_SEED),
         &mut transcript,
     )
     .expect("proof generation should not fail");
     assert_eq!(MEASUREMENTS.load(Ordering::Relaxed), 1);
+    let first_proof = transcript.finalize();
+
+    // The proof bytes must not depend on the parallel schedule: re-create the
+    // proof under single- and multi-worker Rayon pools and require identical
+    // transcripts.
+    #[cfg(feature = "multicore")]
+    for threads in [1, 4] {
+        let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+        MEASUREMENTS.store(0, Ordering::Relaxed);
+        maybe_rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap()
+            .install(|| {
+                create_proof(
+                    &params,
+                    &pk,
+                    &[MyCircuit, MyCircuit, MyCircuit],
+                    &[&[], &[], &[]],
+                    StdRng::seed_from_u64(PROOF_SEED),
+                    &mut transcript,
+                )
+            })
+            .expect("proof generation should not fail");
+        assert_eq!(MEASUREMENTS.load(Ordering::Relaxed), 1);
+        assert_eq!(transcript.finalize(), first_proof);
+    }
+
+    #[cfg(not(feature = "multicore"))]
+    let _ = first_proof;
 }

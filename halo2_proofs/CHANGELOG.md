@@ -8,6 +8,11 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+- **Breaking:** `create_proof` now requires a `Sync` circuit type with a
+  `Send` configuration, and `FloorPlanner::synthesize_batch` carries matching
+  `Send`/`Sync` bounds. Compatible floor planners, including V1, synthesize
+  independent circuit witnesses in parallel when the `multicore` feature is
+  enabled; the serial default remains for other planners.
 - The V1 floor planner now measures and positions a circuit once when creating
   a proof for several instances of that circuit, then reuses the layout for
   each witness assignment.
