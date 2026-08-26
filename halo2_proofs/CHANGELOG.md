@@ -9,6 +9,14 @@ and this project adheres to Rust's notion of
 ## [Unreleased]
 
 - Advice-witness denominators now use the prover's two-lane batch inversion.
+- Added `Params::prepare_commitments`: builds prepared fixed-base multiexp
+  tables over `[g..., w, u]` (shared with `prepare_zero_checks`) and
+  `[g_lagrange..., w, u]`; when armed, `Params::commit` and
+  `Params::commit_lagrange` evaluate through them on pools of at most eight
+  effective threads (measured 1.2-1.8x per commitment at 1-8 threads on
+  x86-64 and Apple silicon, across full-width and witness-like coefficient
+  distributions) and keep the planned multiexp on wider pools, so arming is
+  never a pessimization.
 - The prepared zero-check routing in `MSM::eval` is now thread-aware: on
   pools wider than eight effective threads the identity test falls back to
   the plain planned multiexp, because the prepared evaluation stops scaling
