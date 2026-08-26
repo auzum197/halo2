@@ -15,6 +15,9 @@ and this project adheres to Rust's notion of
   - `EccInstructions::witness_point_non_id_from_constant`
   - `NonIdentityPoint::new_from_constant`
 
+- Fixed-base multiplication witness generation now accumulates incomplete
+  additions in mixed Jacobian coordinates, deferring affine inversions through
+  the existing rational advice representation.
 - Poseidon Pow5 witness generation now caches fixed-size raw round states,
   eliminating per-round temporary vector allocations.
 - Fixed-base witness interpolation now specializes its Horner multiplication
