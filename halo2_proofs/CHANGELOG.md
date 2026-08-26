@@ -27,6 +27,8 @@ and this project adheres to Rust's notion of
 ### Changed
 - The minimum supported Rust version is now 1.88.
 
+- Proof witness collection now stores advice numerators directly and retains
+  only rational denominators for batched inversion.
 - IPA opening proofs now keep late generator-fold rounds parallel instead of
   forcing chunks of at least 32 points.
 - Lookup grand-product preparation now reuses its fraction buffer for product
