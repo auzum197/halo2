@@ -285,7 +285,7 @@ impl<'a, C: CurveAffine> MSM<'a, C> {
     #[cfg_attr(not(feature = "orbits"), allow(unused_mut))]
     pub fn eval(mut self) -> bool {
         // A prepared fixed-base zero-check over [g..., w, u] (built by
-        // `Params::prepare_zero_checks`, under the default `orbits`
+        // `Params::prepare_zero_checks`, under the opt-in `orbits`
         // feature) evaluates the identity test
         // directly, with the accumulated commitment terms as its extras.
         // The decomposition evaluated here is the same view the
