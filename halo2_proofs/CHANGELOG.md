@@ -17,14 +17,6 @@ and this project adheres to Rust's notion of
   x86-64 and Apple silicon, across full-width and witness-like coefficient
   distributions) and keep the planned multiexp on wider pools, so arming is
   never a pessimization.
-- The prepared zero-check routing in `MSM::eval` is now thread-aware: on
-  pools wider than eight effective threads the identity test falls back to
-  the plain planned multiexp, because the prepared evaluation stops scaling
-  there while the unprepared planner keeps scaling (measured end to end,
-  armed verification was 14-16% slower on a 16-thread pool and 22-27%
-  slower on a 32-thread pool at k = 11, while winning by 8-22% at 4-8
-  threads). Arming via `Params::prepare_zero_checks` is now never a
-  pessimization.
 - Proof witness collection now stores advice numerators directly and retains
   only rational denominators for batched inversion.
 - IPA opening proofs now keep late generator-fold rounds parallel instead of
@@ -60,13 +52,20 @@ and this project adheres to Rust's notion of
   plain multiexp. Preparation is explicit (hundreds of milliseconds and
   tens of MiB at typical `k`, amortized across every verification with
   those params; batch verification pays one prepared check per batch), is
-  never serialized, and is shared with all clones of the params. On the
-  Pasta curves the prepared final check measured ~1.6x faster serially
-  and up to ~2.4x on 8–16 workers at `k = 11` scale. Since the prepared
-  check now runs the accumulated commitment terms as their own planned
-  MSM, `MSM::eval` uses it while those terms do not outnumber the fixed
-  bases (the measured crossover on Ironwood batch validation), instead
-  of the earlier half-the-fixed-bases cutoff.
+  never serialized, and is shared with all clones of the params. The
+  routing is thread-aware: `MSM::eval` uses the prepared check on pools
+  of at most eight effective threads — where the prepared final check
+  measured ~1.5-2.4x faster on the Pasta curves at `k = 11` scale, and
+  armed verification won by 8-22% end to end at 4-8 threads — and falls
+  back to the plain planned multiexp on wider pools, where the prepared
+  evaluation stops scaling while the unprepared planner keeps scaling
+  (before the gate, armed verification measured 14-16% slower end to end
+  on a 16-thread pool and 22-27% slower on a 32-thread pool), so arming
+  is never a pessimization. Since the prepared check runs the
+  accumulated commitment terms as their own planned MSM, `MSM::eval`
+  also uses it only while those terms do not outnumber the fixed bases
+  (the measured crossover on Ironwood batch validation), instead of the
+  earlier half-the-fixed-bases cutoff.
 - Proving keys now retain reusable floor-planning data produced during key
   generation. V1 proof creation consumes the cached layout instead of
   measuring and positioning the circuit again.
