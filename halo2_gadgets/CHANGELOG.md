@@ -15,6 +15,9 @@ and this project adheres to Rust's notion of
   - `EccInstructions::witness_point_non_id_from_constant`
   - `NonIdentityPoint::new_from_constant`
 
+- Fixed-base witness interpolation now specializes its Horner multiplication
+  for each three-bit window digit, replacing full field multiplications with
+  short doubling and addition chains.
 - Public-initialized Sinsemilla hashing now derives its existing affine
   witnesses from an in-place Jacobian accumulator that caches its squared
   projective denominator, reducing witness-generation arithmetic and memory
