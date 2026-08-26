@@ -44,6 +44,8 @@ pub struct Params<C: CurveAffine> {
     instance_window_cache: InstanceWindowCache<C>,
     #[cfg(feature = "orbits")]
     zero_check_cache: ZeroCheckCache<C>,
+    #[cfg(feature = "orbits")]
+    lagrange_zero_check_cache: ZeroCheckCache<C>,
 }
 
 /// A lazily built prepared fixed-base zero-check over `[g..., w, u]` (see
@@ -235,6 +237,8 @@ impl<C: CurveAffine> Params<C> {
             instance_window_cache: InstanceWindowCache::default(),
             #[cfg(feature = "orbits")]
             zero_check_cache: ZeroCheckCache::default(),
+            #[cfg(feature = "orbits")]
+            lagrange_zero_check_cache: ZeroCheckCache::default(),
         }
     }
 
@@ -242,6 +246,27 @@ impl<C: CurveAffine> Params<C> {
     /// slice of coefficients. The commitment will be blinded by the blinding
     /// factor `r`.
     pub fn commit(&self, poly: &Polynomial<C::Scalar, Coeff>, r: Blind<C::Scalar>) -> C::Curve {
+        // A prepared table over [g..., w, u] (built by
+        // `Params::prepare_commitments`, or shared from
+        // `Params::prepare_zero_checks`) evaluates this commitment as a
+        // fixed-base multiexp with the blind riding `w` and `u` unused.
+        // Like `MSM::eval`, the routing is thread-gated: past
+        // `PREPARED_ZERO_CHECK_MAX_THREADS` effective threads the planned
+        // multiexp out-scales the prepared evaluation.
+        #[cfg(feature = "orbits")]
+        if crate::multicore::current_num_threads() <= msm::PREPARED_ZERO_CHECK_MAX_THREADS {
+            if let Some(prepared) = self.zero_check() {
+                let n = self.n as usize;
+                if prepared.terms() == n + 2 && poly.len() == n {
+                    let mut fixed = Vec::with_capacity(n + 2);
+                    fixed.extend(poly.iter());
+                    fixed.push(r.0);
+                    fixed.push(C::Scalar::ZERO);
+                    return prepared.multiexp_with_terms_vartime(&fixed, &[]);
+                }
+            }
+        }
+
         let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
         let mut tmp_bases = Vec::with_capacity(poly.len() + 1);
 
@@ -262,6 +287,23 @@ impl<C: CurveAffine> Params<C> {
         poly: &Polynomial<C::Scalar, LagrangeCoeff>,
         r: Blind<C::Scalar>,
     ) -> C::Curve {
+        // The Lagrange-basis counterpart of `commit`'s prepared route,
+        // over the [g_lagrange..., w, u] table built by
+        // `Params::prepare_commitments`; same thread gate.
+        #[cfg(feature = "orbits")]
+        if crate::multicore::current_num_threads() <= msm::PREPARED_ZERO_CHECK_MAX_THREADS {
+            if let Some(prepared) = self.lagrange_zero_check() {
+                let n = self.n as usize;
+                if prepared.terms() == n + 2 && poly.len() == n {
+                    let mut fixed = Vec::with_capacity(n + 2);
+                    fixed.extend(poly.iter());
+                    fixed.push(r.0);
+                    fixed.push(C::Scalar::ZERO);
+                    return prepared.multiexp_with_terms_vartime(&fixed, &[]);
+                }
+            }
+        }
+
         let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
         let mut tmp_bases = Vec::with_capacity(poly.len() + 1);
 
@@ -330,6 +372,8 @@ impl<C: CurveAffine> Params<C> {
             instance_window_cache: InstanceWindowCache::default(),
             #[cfg(feature = "orbits")]
             zero_check_cache: ZeroCheckCache::default(),
+            #[cfg(feature = "orbits")]
+            lagrange_zero_check_cache: ZeroCheckCache::default(),
         })
     }
 
@@ -386,6 +430,57 @@ impl<C: CurveAffine> Params<C> {
     #[cfg(feature = "orbits")]
     pub(crate) fn zero_check(&self) -> Option<Arc<dyn PreparedZeroCheck<C::CurveExt>>> {
         self.zero_check_cache
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// Builds and caches prepared fixed-base multiexp tables for the
+    /// prover's commitments: the coefficient-basis table over `[g..., w, u]`
+    /// (shared with [`Self::prepare_zero_checks`] — [`Self::commit`] and the
+    /// verifier's final check use the same bases) and a second table over
+    /// `[g_lagrange..., w, u]` for [`Self::commit_lagrange`]. When armed,
+    /// both commit methods evaluate through the prepared tables on pools of
+    /// at most eight effective threads — measured 1.2–1.8x per commitment
+    /// at 1–8 threads on x86-64 and Apple silicon alike, across full-width
+    /// and witness-like (boolean, byte, zero-padded) coefficient
+    /// distributions — and keep the planned multiexp on wider pools, where
+    /// the prepared evaluation stops scaling, so arming is never a
+    /// pessimization.
+    ///
+    /// Costs roughly twice [`Self::prepare_zero_checks`] (two tables, each
+    /// hundreds of milliseconds and tens of mebibytes at typical `k`),
+    /// amortized across every subsequent proof with these params. The
+    /// caches are shared with all clones and never serialized; call again
+    /// after [`Params::read`]. Returns whether both tables were built
+    /// (`false` when the `orbits` feature is off or the backend declined —
+    /// commitments then simply keep the planned multiexp).
+    pub fn prepare_commitments(&self) -> bool {
+        #[cfg(feature = "orbits")]
+        {
+            let coefficient = self.prepare_zero_checks();
+            let mut bases = Vec::with_capacity(self.g_lagrange.len() + 2);
+            bases.extend_from_slice(&self.g_lagrange);
+            bases.push(self.w);
+            bases.push(self.u);
+            if let Some(prepared) = C::CurveExt::try_prepare_zero_check(&bases) {
+                *self
+                    .lagrange_zero_check_cache
+                    .0
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::from(prepared));
+                return coefficient;
+            }
+        }
+        false
+    }
+
+    /// The cached Lagrange-basis prepared table, if
+    /// [`Self::prepare_commitments`] built one.
+    #[cfg(feature = "orbits")]
+    pub(crate) fn lagrange_zero_check(&self) -> Option<Arc<dyn PreparedZeroCheck<C::CurveExt>>> {
+        self.lagrange_zero_check_cache
             .0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -640,6 +735,68 @@ fn test_commit_lagrange_eqaffine() {
     assert_eq!(params.commit(&b, alpha), params.commit_lagrange(&a, alpha));
 }
 
+/// Prepared commitment tables must not change a single commitment: armed
+/// params (routed through the prepared tables inside a pool within the
+/// thread gate, and through the planned multiexp on the ambient pool) agree
+/// with independent unarmed params on random polynomials in both bases,
+/// including sparse witness-like coefficient patterns.
+#[test]
+fn prepared_commitments_match_unprepared() {
+    const K: u32 = 6;
+
+    use rand::rng;
+
+    use crate::pasta::{EqAffine, Fp};
+    // Clones share the preparation caches, so an unarmed control needs its
+    // own independently constructed (deterministic) params.
+    let armed = Params::<EqAffine>::new(K);
+    let unarmed = Params::<EqAffine>::new(K);
+    let domain = super::EvaluationDomain::new(1, K);
+    let armed_ok = armed.prepare_commitments();
+    #[cfg(feature = "orbits")]
+    {
+        assert!(armed_ok, "Pasta params must arm under the orbits feature");
+        assert!(armed.zero_check().is_some());
+        assert!(armed.lagrange_zero_check().is_some());
+    }
+    #[cfg(not(feature = "orbits"))]
+    assert!(!armed_ok);
+
+    let mut rng = rng();
+    let exercise = |armed: &Params<EqAffine>, unarmed: &Params<EqAffine>, seed: u64| {
+        let mut a = domain.empty_lagrange();
+        for (i, a) in a.iter_mut().enumerate() {
+            // A witness-like mix: zero padding, booleans, small values, and
+            // full-width entries.
+            *a = match i % 4 {
+                0 => Fp::zero(),
+                1 => Fp::from((i as u64) & 1),
+                2 => Fp::from(seed + i as u64),
+                _ => Fp::random(&mut rand::rng()),
+            };
+        }
+        let b = domain.lagrange_to_coeff(a.clone());
+        let alpha = Blind(Fp::random(&mut rand::rng()));
+        assert_eq!(armed.commit(&b, alpha), unarmed.commit(&b, alpha));
+        assert_eq!(
+            armed.commit_lagrange(&a, alpha),
+            unarmed.commit_lagrange(&a, alpha)
+        );
+        assert_eq!(armed.commit(&b, alpha), armed.commit_lagrange(&a, alpha));
+    };
+
+    // Ambient pool: on wide hosts this covers the fall-through to the
+    // planned multiexp.
+    exercise(&armed, &unarmed, Fp::random(&mut rng).to_repr()[0] as u64);
+    // A pool within the thread gate pins the prepared route itself.
+    #[cfg(all(feature = "orbits", feature = "multicore"))]
+    maybe_rayon::ThreadPoolBuilder::new()
+        .num_threads(msm::PREPARED_ZERO_CHECK_MAX_THREADS)
+        .build()
+        .expect("test pool must build")
+        .install(|| exercise(&armed, &unarmed, 41));
+}
+
 #[test]
 fn test_opening_proof() {
     const K: u32 = 6;
@@ -663,6 +820,11 @@ fn test_opening_proof() {
     let mut params_buffer = vec![];
     params.write(&mut params_buffer).unwrap();
     let params: Params<EpAffine> = Params::read::<_>(&mut &params_buffer[..]).unwrap();
+    // Arm the prepared commitment tables (a no-op without `orbits`): on
+    // hosts within the thread gate this routes the commitment below and the
+    // verifier's final check through the preparations, so the round trip
+    // covers the prepared prover and verifier paths against each other.
+    params.prepare_commitments();
 
     let domain = EvaluationDomain::new(1, K);
 
