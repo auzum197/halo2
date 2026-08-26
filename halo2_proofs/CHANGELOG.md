@@ -9,6 +9,14 @@ and this project adheres to Rust's notion of
 ## [Unreleased]
 
 - Advice-witness denominators now use the prover's two-lane batch inversion.
+- The prepared zero-check routing in `MSM::eval` is now thread-aware: on
+  pools wider than eight effective threads the identity test falls back to
+  the plain planned multiexp, because the prepared evaluation stops scaling
+  there while the unprepared planner keeps scaling (measured end to end,
+  armed verification was 14-16% slower on a 16-thread pool and 22-27%
+  slower on a 32-thread pool at k = 11, while winning by 8-22% at 4-8
+  threads). Arming via `Params::prepare_zero_checks` is now never a
+  pessimization.
 - Proof witness collection now stores advice numerators directly and retains
   only rational denominators for batched inversion.
 - IPA opening proofs now keep late generator-fold rounds parallel instead of
