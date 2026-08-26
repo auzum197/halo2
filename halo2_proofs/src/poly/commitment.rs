@@ -402,7 +402,7 @@ impl<C: CurveAffine> Params<C> {
     /// `false` means arming was a no-op — the curve has no prepared
     /// backend, the backend declined (its prepared table for this SRS
     /// would exceed its internal memory budget; very large `k`), or the
-    /// `orbits` feature (enabled by default) is off — and verification
+    /// `orbits` feature (disabled by default) is off — and verification
     /// simply keeps evaluating the plain multiexp. Callers may ignore the
     /// result; long-lived validators that expect the speedup can assert
     /// or log it.

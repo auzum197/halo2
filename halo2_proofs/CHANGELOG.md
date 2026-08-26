@@ -44,7 +44,7 @@ and this project adheres to Rust's notion of
 - Public-instance commitments and polynomial transforms for independent proof
   circuits are now prepared in parallel when multicore support is enabled,
   while retaining transcript order.
-- Added a default-enabled `orbits` feature (forwarding `pasta_curves/orbits`)
+- Added an opt-in (default-off) `orbits` feature (forwarding `pasta_curves/orbits`)
   gating the prepared zero-check integration below. Built without it,
   `Params::prepare_zero_checks` is a no-op returning `false` and
   `MSM::eval` always evaluates the plain multiexp, so the machinery can
