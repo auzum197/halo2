@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 /// (32-hw-thread Skylake-X) — the crossover sits between 8 and 16 on both
 /// architectures, on the assembly and portable field backends alike.
 #[cfg(feature = "orbits")]
-const PREPARED_ZERO_CHECK_MAX_THREADS: usize = 8;
+pub(crate) const PREPARED_ZERO_CHECK_MAX_THREADS: usize = 8;
 
 type ArbitraryTerm<C> = (
     <C as CurveAffine>::Base,
