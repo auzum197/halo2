@@ -15,6 +15,9 @@ and this project adheres to Rust's notion of
   - `EccInstructions::witness_point_non_id_from_constant`
   - `NonIdentityPoint::new_from_constant`
 
+- Sinsemilla witness generation now uses the configured field backend for
+  projective squares and reuses precomputed first-word witnesses for Orchard
+  MerkleCRH hashing.
 - Fixed-base multiplication witness generation now accumulates incomplete
   additions in mixed Jacobian coordinates, deferring affine inversions through
   the existing rational advice representation.
