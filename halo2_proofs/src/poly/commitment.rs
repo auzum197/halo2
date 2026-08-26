@@ -340,6 +340,13 @@ impl<C: CurveAffine> Params<C> {
     /// Pasta curves this measured the verifier's final check ~1.5–2.4x
     /// faster; other curves without a prepared backend make this a no-op.
     ///
+    /// The routing is thread-aware: on pools wider than eight effective
+    /// threads the unprepared planner out-scales the prepared evaluation
+    /// (measured end-to-end on 16- and 32-thread pools), so `eval` falls
+    /// back to the plain multiexp there and arming is never a
+    /// pessimization — a wide-pool validator simply amortizes the
+    /// preparation over the verifications that run on narrower pools.
+    ///
     /// Preparation costs hundreds of milliseconds and tens of mebibytes
     /// at typical `k`, amortized across every subsequent verification
     /// with these params (batch verification folds many proofs into a
