@@ -5,20 +5,24 @@ use group::Group;
 
 use std::collections::BTreeMap;
 
-/// The widest thread pool on which [`MSM::eval`] still routes its identity
-/// test through a prepared zero-check. The prepared evaluation stops
-/// scaling past this width — its wide-radix codebook has fewer window
-/// tasks than the unprepared orbit backend, and under contention its
-/// reduction inflates in total work — while the unprepared planner keeps
-/// scaling, so on full pools the prepared path measures *slower* despite
-/// its large low-thread wins. Measured end-to-end on the Orchard-shaped
-/// verifier (k = 11, within-process interleaved cells): armed vs unarmed
-/// at 1 action is −22% at 4 threads and −8% at 8 threads (prepared wins),
-/// but +15% at 16 threads (Apple M4 Max) and +22–27% at a 32-thread pool
+/// The widest thread pool on which the prepared fixed-base routes stay
+/// engaged: [`MSM::eval`]'s identity test through the prepared zero-check,
+/// and `Params::commit` / `Params::commit_lagrange` through the prepared
+/// commitment tables. The prepared evaluation stops scaling past this
+/// width — its wide-radix codebook has fewer window tasks than the
+/// unprepared orbit backend, and under contention its reduction inflates
+/// in total work — while the unprepared planner keeps scaling, so on full
+/// pools the prepared path measures *slower* despite its large low-thread
+/// wins. Measured end-to-end on the Orchard-shaped verifier (k = 11,
+/// within-process interleaved cells): armed vs unarmed at 1 action is
+/// −22% at 4 threads and −8% at 8 threads (prepared wins), but +15% at
+/// 16 threads (Apple M4 Max) and +22–27% at a 32-thread pool
 /// (32-hw-thread Skylake-X) — the crossover sits between 8 and 16 on both
-/// architectures, on the assembly and portable field backends alike.
+/// architectures, on the assembly and portable field backends alike. The
+/// prepared prover commitments cross over in the same band (1.2–1.8x
+/// wins at 1–8 threads, losses on full pools, on both hosts).
 #[cfg(feature = "orbits")]
-pub(crate) const PREPARED_ZERO_CHECK_MAX_THREADS: usize = 8;
+pub(crate) const PREPARED_MSM_MAX_THREADS: usize = 8;
 
 type ArbitraryTerm<C> = (
     <C as CurveAffine>::Base,
@@ -305,13 +309,13 @@ impl<'a, C: CurveAffine> MSM<'a, C> {
         // fixed-base count itself.
         //
         // The prepared path is also gated on the pool width: past
-        // [`PREPARED_ZERO_CHECK_MAX_THREADS`] effective threads the
+        // [`PREPARED_MSM_MAX_THREADS`] effective threads the
         // unprepared planner out-scales the prepared evaluation and the
         // armed check measures slower end-to-end (see the constant's
         // docs), so wide pools fall through to the plain multiexp and
         // arming is never a pessimization.
         #[cfg(feature = "orbits")]
-        if crate::multicore::current_num_threads() <= PREPARED_ZERO_CHECK_MAX_THREADS {
+        if crate::multicore::current_num_threads() <= PREPARED_MSM_MAX_THREADS {
             if let Some(prepared) = self.params.zero_check() {
                 let n = self.params.n as usize;
                 if prepared.terms() == n + 2 {
@@ -475,17 +479,22 @@ mod tests {
         }
         #[cfg(not(feature = "orbits"))]
         assert!(!armed);
-        // On pools wider than `PREPARED_ZERO_CHECK_MAX_THREADS` this
-        // ambient armed run covers `eval`'s fall-through to the plain
-        // multiexp; the capped pool below pins the prepared placement
-        // itself regardless of the host's width.
+        // Ambient pool first, then two capped pools: one within the
+        // prepared thread gate pins the prepared placement itself, and one
+        // just past it pins the armed fall-through of `eval` to the plain
+        // multiexp — both regardless of the host's width.
         exercise_fixed_scalar_placement(&params, n);
         #[cfg(all(feature = "orbits", feature = "multicore"))]
-        maybe_rayon::ThreadPoolBuilder::new()
-            .num_threads(super::PREPARED_ZERO_CHECK_MAX_THREADS)
-            .build()
-            .expect("test pool must build")
-            .install(|| exercise_fixed_scalar_placement(&params, n));
+        for num_threads in [
+            super::PREPARED_MSM_MAX_THREADS,
+            super::PREPARED_MSM_MAX_THREADS + 1,
+        ] {
+            maybe_rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build()
+                .expect("test pool must build")
+                .install(|| exercise_fixed_scalar_placement(&params, n));
+        }
     }
 
     fn exercise_fixed_scalar_placement(params: &Params<EpAffine>, n: usize) {
