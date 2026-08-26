@@ -15,6 +15,8 @@ and this project adheres to Rust's notion of
   - `EccInstructions::witness_point_non_id_from_constant`
   - `NonIdentityPoint::new_from_constant`
 
+- Range-check running-sum witnesses now derive inverse powers of two from the
+  field's existing `TWO_INV` constant instead of repeating field inversions.
 - Sinsemilla witness generation now uses the configured field backend for
   projective squares and reuses precomputed first-word witnesses for Orchard
   MerkleCRH hashing.
