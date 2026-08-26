@@ -5,6 +5,21 @@ use group::Group;
 
 use std::collections::BTreeMap;
 
+/// The widest thread pool on which [`MSM::eval`] still routes its identity
+/// test through a prepared zero-check. The prepared evaluation stops
+/// scaling past this width — its wide-radix codebook has fewer window
+/// tasks than the unprepared orbit backend, and under contention its
+/// reduction inflates in total work — while the unprepared planner keeps
+/// scaling, so on full pools the prepared path measures *slower* despite
+/// its large low-thread wins. Measured end-to-end on the Orchard-shaped
+/// verifier (k = 11, within-process interleaved cells): armed vs unarmed
+/// at 1 action is −22% at 4 threads and −8% at 8 threads (prepared wins),
+/// but +15% at 16 threads (Apple M4 Max) and +22–27% at a 32-thread pool
+/// (32-hw-thread Skylake-X) — the crossover sits between 8 and 16 on both
+/// architectures, on the assembly and portable field backends alike.
+#[cfg(feature = "orbits")]
+const PREPARED_ZERO_CHECK_MAX_THREADS: usize = 8;
+
 type ArbitraryTerm<C> = (
     <C as CurveAffine>::Base,
     (<C as CurveAffine>::ScalarExt, <C as CurveAffine>::Base),
@@ -288,44 +303,53 @@ impl<'a, C: CurveAffine> MSM<'a, C> {
         // extras ≈ 0.75n (32-bundle batches) and behind by ~5% on wide
         // pools at extras ≈ 1.5n (64 bundles); the crossover sits at the
         // fixed-base count itself.
+        //
+        // The prepared path is also gated on the pool width: past
+        // [`PREPARED_ZERO_CHECK_MAX_THREADS`] effective threads the
+        // unprepared planner out-scales the prepared evaluation and the
+        // armed check measures slower end-to-end (see the constant's
+        // docs), so wide pools fall through to the plain multiexp and
+        // arming is never a pessimization.
         #[cfg(feature = "orbits")]
-        if let Some(prepared) = self.params.zero_check() {
-            let n = self.params.n as usize;
-            if prepared.terms() == n + 2 {
-                if !self.batched_other.is_empty() {
-                    // Canonicalize in place rather than on a clone: the
-                    // merged view serves the prepared check's extras, and
-                    // if the guard below falls through, `multiexp`
-                    // re-canonicalizes the already-canonical buffer, which
-                    // is idempotent.
-                    let mut combined = std::mem::take(&mut self.batched_other);
-                    combined.extend(self.other.iter().map(|(x, values)| (*x, *values)));
-                    self.other.clear();
-                    self.batched_other = canonicalize_other::<C>(combined);
-                }
-                let extra: Vec<(C::Scalar, C)> = if self.batched_other.is_empty() {
-                    self.other
-                        .iter()
-                        .map(|(x, (scalar, y))| (*scalar, C::from_xy(*x, *y).unwrap()))
-                        .collect()
-                } else {
-                    self.batched_other
-                        .iter()
-                        .map(|(x, (scalar, y))| (*scalar, C::from_xy(*x, *y).unwrap()))
-                        .collect()
-                };
-                if extra.len() <= n {
-                    let mut fixed = vec![C::Scalar::ZERO; n + 2];
-                    if let Some(g_scalars) = &self.g_scalars {
-                        fixed[..n].copy_from_slice(g_scalars);
+        if crate::multicore::current_num_threads() <= PREPARED_ZERO_CHECK_MAX_THREADS {
+            if let Some(prepared) = self.params.zero_check() {
+                let n = self.params.n as usize;
+                if prepared.terms() == n + 2 {
+                    if !self.batched_other.is_empty() {
+                        // Canonicalize in place rather than on a clone: the
+                        // merged view serves the prepared check's extras, and
+                        // if the guard below falls through, `multiexp`
+                        // re-canonicalizes the already-canonical buffer, which
+                        // is idempotent.
+                        let mut combined = std::mem::take(&mut self.batched_other);
+                        combined.extend(self.other.iter().map(|(x, values)| (*x, *values)));
+                        self.other.clear();
+                        self.batched_other = canonicalize_other::<C>(combined);
                     }
-                    if let Some(w_scalar) = self.w_scalar {
-                        fixed[n] = w_scalar;
+                    let extra: Vec<(C::Scalar, C)> = if self.batched_other.is_empty() {
+                        self.other
+                            .iter()
+                            .map(|(x, (scalar, y))| (*scalar, C::from_xy(*x, *y).unwrap()))
+                            .collect()
+                    } else {
+                        self.batched_other
+                            .iter()
+                            .map(|(x, (scalar, y))| (*scalar, C::from_xy(*x, *y).unwrap()))
+                            .collect()
+                    };
+                    if extra.len() <= n {
+                        let mut fixed = vec![C::Scalar::ZERO; n + 2];
+                        if let Some(g_scalars) = &self.g_scalars {
+                            fixed[..n].copy_from_slice(g_scalars);
+                        }
+                        if let Some(w_scalar) = self.w_scalar {
+                            fixed[n] = w_scalar;
+                        }
+                        if let Some(u_scalar) = self.u_scalar {
+                            fixed[n + 1] = u_scalar;
+                        }
+                        return prepared.is_zero_with_terms_vartime(&fixed, &extra);
                     }
-                    if let Some(u_scalar) = self.u_scalar {
-                        fixed[n + 1] = u_scalar;
-                    }
-                    return prepared.is_zero_with_terms_vartime(&fixed, &extra);
                 }
             }
         }
@@ -442,14 +466,26 @@ mod tests {
             // The guard preconditions of `eval`'s prepared branch: armed,
             // and the preparation covers exactly [g..., w, u]. Every case
             // below keeps its extras count at or below `n`, so each
-            // armed `eval` routes through the prepared check.
+            // armed `eval` routes through the prepared check whenever the
+            // pool is within the prepared thread gate (guaranteed by the
+            // capped pool at the end of this test).
             assert!(armed, "Pasta params must arm under the orbits feature");
             let prepared = params.zero_check().expect("armed above");
             assert_eq!(prepared.terms(), n + 2);
         }
         #[cfg(not(feature = "orbits"))]
         assert!(!armed);
+        // On pools wider than `PREPARED_ZERO_CHECK_MAX_THREADS` this
+        // ambient armed run covers `eval`'s fall-through to the plain
+        // multiexp; the capped pool below pins the prepared placement
+        // itself regardless of the host's width.
         exercise_fixed_scalar_placement(&params, n);
+        #[cfg(all(feature = "orbits", feature = "multicore"))]
+        maybe_rayon::ThreadPoolBuilder::new()
+            .num_threads(super::PREPARED_ZERO_CHECK_MAX_THREADS)
+            .build()
+            .expect("test pool must build")
+            .install(|| exercise_fixed_scalar_placement(&params, n));
     }
 
     fn exercise_fixed_scalar_placement(params: &Params<EpAffine>, n: usize) {
