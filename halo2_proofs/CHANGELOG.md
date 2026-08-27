@@ -8,6 +8,7 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+- Prepared the `1.0.0-rc.4` release.
 - Advice-witness denominators now use the prover's two-lane batch inversion.
 - IPA opening proofs now sample their zero-evaluation masking polynomial
   sparsely, as $\sum_t \alpha_t (X^{2^t} - x^{2^t})$, instead of sampling and

@@ -8,6 +8,7 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+- Prepared the `1.0.0-rc.4` release.
 - Range-check running-sum witnesses now derive inverse powers of two from the
   field's existing `TWO_INV` constant instead of repeating field inversions.
 - Sinsemilla witness generation now uses the configured field backend for
