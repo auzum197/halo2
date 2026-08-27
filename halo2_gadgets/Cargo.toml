@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.88"
 name = "zakura-halo2-gadgets"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 authors = [
     "Dev Ojha <ValarDragon@users.noreply.github.com>",
     "Sean Bowe <ewillbefull@gmail.com>",
@@ -99,19 +99,19 @@ version = "0.14"
 
 [dependencies.halo2_poseidon]
 path = "../halo2_poseidon"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 default-features = false
 package = "zakura-halo2-poseidon"
 
 [dependencies.halo2_proofs]
 path = "../halo2_proofs"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 default-features = false
 package = "zakura-halo2-proofs"
 
 [dependencies.pasta_curves]
 path = "../pasta_curves"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 package = "zakura-pasta-curves"
 
 [dependencies.plotters]
@@ -125,7 +125,7 @@ optional = true
 
 [dependencies.sinsemilla]
 path = "../sinsemilla"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 package = "zakura-sinsemilla"
 
 [dependencies.subtle]
@@ -136,7 +136,7 @@ version = "0.3"
 
 [dev-dependencies.halo2_poseidon]
 path = "../halo2_poseidon"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 features = ["test-dependencies"]
 default-features = false
 package = "zakura-halo2-poseidon"
@@ -149,7 +149,7 @@ version = "0.10"
 
 [dev-dependencies.sinsemilla]
 path = "../sinsemilla"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 features = ["test-dependencies"]
 package = "zakura-sinsemilla"
 
