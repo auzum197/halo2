@@ -11,6 +11,57 @@ use crate::transcript::{EncodedChallenge, TranscriptWrite};
 use group::{Curve, Group};
 use std::io;
 
+/// Samples the sparse polynomial that masks the final folded IPA scalar,
+///
+/// $$s(X) = \sum_{t=0}^{k-1} \alpha_t (X^{2^t} - x^{2^t}),$$
+///
+/// returning `(index, coefficient)` pairs in increasing index order over
+/// the support $\{0, 1, 2, 4, \ldots, 2^{k-1}\}$. It satisfies $s(x) = 0$
+/// for every choice of the $\alpha_t$, and the parent module's HVZK proof
+/// shows the scalar it masks is either uniform or publicly zero.
+fn sample_ipa_masking_polynomial<F: Field, R: Rng>(k: u32, x: F, rng: &mut R) -> Vec<(usize, F)> {
+    let mut constant = F::ZERO;
+    let mut coefficients = Vec::with_capacity(k as usize + 1);
+    coefficients.push((0, F::ZERO));
+
+    let mut x_power = x; // x^{2^t}, by repeated squaring
+    for t in 0..k {
+        let alpha = F::random(&mut *rng);
+        constant -= alpha * x_power;
+        coefficients.push((1 << t, alpha));
+        x_power = x_power.square();
+    }
+    coefficients[0].1 = constant;
+
+    coefficients
+}
+
+fn ipa_masking_commitment<C: CurveAffine>(
+    coefficients: &[(usize, C::Scalar)],
+    blind: Blind<C::Scalar>,
+    params: &Params<C>,
+) -> C::Curve {
+    // A mask on any other support could leave IPA rounds unmasked without
+    // failing any later check, so require exactly the constant plus each
+    // power-of-two index for these params.
+    assert_eq!(coefficients.len(), params.k as usize + 1);
+    assert_eq!(coefficients[0].0, 0);
+    for (t, (index, _)) in coefficients[1..].iter().enumerate() {
+        assert_eq!(*index, 1 << t);
+    }
+
+    let mut scalars = Vec::with_capacity(coefficients.len() + 1);
+    let mut bases = Vec::with_capacity(coefficients.len() + 1);
+    for (index, coefficient) in coefficients {
+        scalars.push(*coefficient);
+        bases.push(params.g[*index]);
+    }
+    scalars.push(blind.0);
+    bases.push(params.w);
+
+    best_multiexp(&scalars, &bases)
+}
+
 fn ipa_round_multiexp<C: CurveAffine>(
     coeffs: &[C::Scalar],
     bases: &[C],
@@ -54,21 +105,14 @@ pub fn create_proof<C: CurveAffine, E: EncodedChallenge<C>, R: Rng, T: Transcrip
     // We're limited to polynomials of degree n - 1.
     assert_eq!(p_poly.len(), params.n as usize);
 
-    // Sample a random polynomial (of same degree) that has a root at x_3, first
-    // by setting all coefficients to random values.
-    let mut s_poly = (*p_poly).clone();
-    for coeff in s_poly.iter_mut() {
-        *coeff = C::Scalar::random(&mut rng);
-    }
-    // Evaluate the random polynomial at x_3
-    let s_at_x3 = eval_polynomial(&s_poly[..], x_3);
-    // Subtract constant coefficient to get a random polynomial with a root at x_3
-    s_poly[0] -= &s_at_x3;
-    // And sample a random blind
+    // Sample a sparse random polynomial with a root at x_3, supported on the
+    // constant and power-of-two coefficients. See the parent module's
+    // sparse-masking HVZK proof.
+    let s_poly = sample_ipa_masking_polynomial(params.k, x_3, &mut rng);
     let s_poly_blind = Blind(C::Scalar::random(&mut rng));
 
-    // Write a commitment to the random polynomial to the transcript
-    let s_poly_commitment = params.commit(&s_poly, s_poly_blind).to_affine();
+    // Commit the k + 1 mask coefficients and the independent blind.
+    let s_poly_commitment = ipa_masking_commitment(&s_poly, s_poly_blind, params).to_affine();
     transcript.write_point(s_poly_commitment)?;
 
     // Challenge that will ensure that the prover cannot change P but can only
@@ -82,7 +126,10 @@ pub fn create_proof<C: CurveAffine, E: EncodedChallenge<C>, R: Rng, T: Transcrip
 
     // We'll be opening `P' = P - [v] G_0 + [ξ] S` to ensure it has a root at
     // zero.
-    let mut p_prime_poly = s_poly * xi + p_poly;
+    let mut p_prime_poly = p_poly.clone();
+    for (index, mask) in &s_poly {
+        p_prime_poly[*index] += *mask * xi;
+    }
     let v = eval_polynomial(&p_prime_poly, x_3);
     p_prime_poly[0] -= &v;
     let p_prime_blind = s_poly_blind * Blind(xi) + p_blind;
@@ -215,11 +262,16 @@ fn parallel_generator_collapse<C: CurveAffine>(g: &mut [C], challenge: C::Scalar
 
 #[cfg(test)]
 mod tests {
-    use super::{ipa_round_multiexp, parallel_generator_collapse, Params};
-    use crate::arithmetic::{best_multiexp, CurveAffine};
+    use super::{
+        ipa_masking_commitment, ipa_round_multiexp, parallel_generator_collapse,
+        sample_ipa_masking_polynomial, Params,
+    };
+    use crate::arithmetic::{best_multiexp, eval_polynomial, CurveAffine};
+    use crate::poly::{commitment::Blind, EvaluationDomain};
     use ff::Field;
     use group::{Curve, Group};
     use pasta_curves::{pallas, vesta};
+    use rand::rng;
 
     fn full_width_scalar<C: CurveAffine>() -> C::Scalar {
         (C::Scalar::from(0x9E37_79B9_7F4A_7C15u64).square()
@@ -253,6 +305,121 @@ mod tests {
                 ipa_round_multiexp(&coeffs, bases, value, randomness, &params, z),
                 expected,
             );
+        }
+    }
+
+    fn masking_polynomial_is_sparse_and_commits_correctly<C>()
+    where
+        C: CurveAffine + core::fmt::Debug,
+    {
+        for k in [1u32, 6, 11] {
+            let params = Params::<C>::new(k);
+            let domain = EvaluationDomain::new(1, k);
+            let x = full_width_scalar::<C>();
+            let mut rng = rng();
+            let coefficients = sample_ipa_masking_polynomial(k, x, &mut rng);
+
+            let expected_support: Vec<usize> =
+                core::iter::once(0).chain((0..k).map(|t| 1 << t)).collect();
+            assert_eq!(
+                coefficients
+                    .iter()
+                    .map(|(index, _)| *index)
+                    .collect::<Vec<_>>(),
+                expected_support,
+            );
+
+            let mut full = domain.empty_coeff();
+            for (index, coefficient) in &coefficients {
+                full[*index] = *coefficient;
+            }
+            assert_eq!(eval_polynomial(&full, x), C::Scalar::ZERO);
+
+            let blind = Blind(C::Scalar::random(&mut rng));
+            assert_eq!(
+                ipa_masking_commitment(&coefficients, blind, &params),
+                params.commit(&full, blind),
+            );
+        }
+    }
+
+    /// Apply the prover's IPA collapse to the coefficient vector `s` and
+    /// return the fully folded scalar.
+    fn collapsed_scalar<F: Field>(mut s: Vec<F>, challenges: &[F]) -> F {
+        let mut len = s.len();
+        for u_j in challenges {
+            let u_j_inv = u_j.invert().unwrap();
+            let half = len / 2;
+            for i in 0..half {
+                let hi = s[i + half];
+                s[i] += hi * u_j_inv;
+            }
+            len = half;
+        }
+        s[0]
+    }
+
+    fn masking_basis_detects_every_non_evaluation_fold<C>()
+    where
+        C: CurveAffine + core::fmt::Debug,
+    {
+        const K: u32 = 8;
+        let n = 1usize << K;
+        let x = full_width_scalar::<C>();
+        let mut rng = rng();
+
+        // The challenge pattern that selects the parent module's zero case:
+        // u_{k-1-t} = x^{-2^t} for every t.
+        let mut zero_case = vec![C::Scalar::ZERO; K as usize];
+        let mut x_power = x;
+        for t in 0..K as usize {
+            zero_case[K as usize - 1 - t] = x_power.invert().unwrap();
+            x_power = x_power.square();
+        }
+
+        // Under that pattern the collapse is the public evaluation
+        // functional at x — the parent module's product formula — pinned
+        // here on a dense random polynomial to anchor `collapsed_scalar`
+        // against an independent evaluation.
+        let dense: Vec<C::Scalar> = (0..n).map(|_| C::Scalar::random(&mut rng)).collect();
+        assert_eq!(
+            collapsed_scalar(dense.clone(), &zero_case),
+            eval_polynomial(&dense, x),
+        );
+
+        // The sampled mask is a linear combination of the basis vectors
+        // s_t(X) = X^{2^t} - x^{2^t}, and each basis vector folds to the
+        // linear-functional coefficient u_{k-1-t}^{-1} - x^{2^t} from the
+        // parent module. Check deterministically that this coefficient is
+        // zero under the zero-case pattern and nonzero the moment the one
+        // challenge controlling index 2^t deviates: the functional's
+        // coefficients all vanish exactly in the zero case, so the folded
+        // mask is uniform whenever any challenge deviates. A
+        // prefix-supported mask has no basis vector at large 2^t, so
+        // early-round deviations go undetected there.
+        let two = C::Scalar::from(2);
+        let mut x_power = x;
+        for t in 0..K as usize {
+            let mut basis_mask = vec![C::Scalar::ZERO; n];
+            basis_mask[0] = -x_power;
+            basis_mask[1 << t] = C::Scalar::ONE;
+
+            assert_eq!(
+                collapsed_scalar(basis_mask.clone(), &zero_case),
+                C::Scalar::ZERO,
+            );
+
+            // Deviate deterministically in the one challenge controlling
+            // index 2^t.
+            let j = K as usize - 1 - t;
+            let mut challenges = zero_case.clone();
+            challenges[j] *= two;
+
+            let expected = challenges[j].invert().unwrap() - x_power;
+            assert_ne!(expected, C::Scalar::ZERO);
+            assert_eq!(collapsed_scalar(basis_mask, &challenges), expected);
+
+            x_power = x_power.square();
         }
     }
 
@@ -312,5 +479,25 @@ mod tests {
     #[test]
     fn round_multiexp_matches_split_vesta() {
         round_multiexp_matches_split::<vesta::Affine>();
+    }
+
+    #[test]
+    fn masking_polynomial_is_sparse_and_commits_correctly_pallas() {
+        masking_polynomial_is_sparse_and_commits_correctly::<pallas::Affine>();
+    }
+
+    #[test]
+    fn masking_polynomial_is_sparse_and_commits_correctly_vesta() {
+        masking_polynomial_is_sparse_and_commits_correctly::<vesta::Affine>();
+    }
+
+    #[test]
+    fn masking_basis_detects_every_non_evaluation_fold_pallas() {
+        masking_basis_detects_every_non_evaluation_fold::<pallas::Affine>();
+    }
+
+    #[test]
+    fn masking_basis_detects_every_non_evaluation_fold_vesta() {
+        masking_basis_detects_every_non_evaluation_fold::<vesta::Affine>();
     }
 }
