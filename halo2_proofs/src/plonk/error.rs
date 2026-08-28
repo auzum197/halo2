@@ -83,10 +83,9 @@ impl fmt::Display for Error {
                 "Column {column:?} must be included in the permutation. Help: try applying `meta.enable_equalty` on the column"
             ),
             Error::TableError(error) => write!(f, "{error}"),
-            Error::IllegalHashFromPrivatePoint =>  write!(
-                f,
-                "Hashing from private point is disabled"
-            )
+            Error::IllegalHashFromPrivatePoint => {
+                write!(f, "Hashing from private point is disabled")
+            }
         }
     }
 }

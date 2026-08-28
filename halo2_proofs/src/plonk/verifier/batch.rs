@@ -1,19 +1,19 @@
 use group::{
-    ff::{Field, FromUniformBytes, PrimeField},
     Curve, Group,
+    ff::{Field, FromUniformBytes, PrimeField},
 };
 use pasta_curves::arithmetic::CurveAffine;
 use rand::rngs::SysRng;
 use std::sync::Arc;
 
-use super::{validate_instances, verify_proof_with_instance_commitments, VerificationStrategy};
+use super::{VerificationStrategy, validate_instances, verify_proof_with_instance_commitments};
 use crate::{
-    multicore::{IntoParallelIterator, TryFoldAndReduce},
-    plonk::{commit_instance, Error, VerifyingKey},
-    poly::commitment::{Guard, Params, MSM},
-    transcript::{Blake2bRead, EncodedChallenge},
-    InstanceWindowTable, INSTANCE_WINDOW_BITS, INSTANCE_WINDOW_ENTRIES_PER_BASE,
+    INSTANCE_WINDOW_BITS, INSTANCE_WINDOW_ENTRIES_PER_BASE, InstanceWindowTable,
     MAX_CACHED_INSTANCE_ROWS,
+    multicore::{IntoParallelIterator, TryFoldAndReduce},
+    plonk::{Error, VerifyingKey, commit_instance},
+    poly::commitment::{Guard, MSM, Params},
+    transcript::{Blake2bRead, EncodedChallenge},
 };
 
 #[cfg(feature = "multicore")]
@@ -291,10 +291,10 @@ mod tests {
     use ff::{Field, FromUniformBytes};
     use pasta_curves::{EpAffine, EqAffine, Fp, Fq};
 
-    use super::{commit_instance_with_table, InstanceFixedWindowTable};
+    use super::{InstanceFixedWindowTable, commit_instance_with_table};
     use crate::{
-        plonk::commit_instance, poly::commitment::Params, INSTANCE_WINDOW_ENTRIES_PER_BASE,
-        MAX_CACHED_INSTANCE_ROWS,
+        INSTANCE_WINDOW_ENTRIES_PER_BASE, MAX_CACHED_INSTANCE_ROWS, plonk::commit_instance,
+        poly::commitment::Params,
     };
 
     #[test]

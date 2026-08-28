@@ -381,8 +381,8 @@ impl<Fixed: FixedPoints<pallas::Affine>, Lookup: PallasLookupRangeCheck> Config<
 #[cfg(test)]
 pub mod tests {
     use group::{
-        ff::{Field, PrimeField},
         Curve,
+        ff::{Field, PrimeField},
     };
     use halo2_proofs::{
         circuit::{Chip, Layouter, Value},
@@ -393,11 +393,11 @@ pub mod tests {
 
     use crate::{
         ecc::{
+            FixedPointBaseField, NonIdentityPoint, Point,
             chip::{EccChip, FixedPoint, H},
             tests::{BaseField, TestFixedBases},
-            FixedPointBaseField, NonIdentityPoint, Point,
         },
-        utilities::{lookup_range_check::PallasLookupRangeCheck, UtilitiesInstructions},
+        utilities::{UtilitiesInstructions, lookup_range_check::PallasLookupRangeCheck},
     };
 
     pub(crate) fn test_mul_fixed_base_field<Lookup: PallasLookupRangeCheck>(

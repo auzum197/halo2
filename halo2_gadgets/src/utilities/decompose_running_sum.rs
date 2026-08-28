@@ -236,11 +236,11 @@ mod tests {
         }
 
         impl<
-                F: PrimeFieldBits,
-                const WORD_NUM_BITS: usize,
-                const WINDOW_NUM_BITS: usize,
-                const NUM_WINDOWS: usize,
-            > Circuit<F> for MyCircuit<F, WORD_NUM_BITS, WINDOW_NUM_BITS, NUM_WINDOWS>
+            F: PrimeFieldBits,
+            const WORD_NUM_BITS: usize,
+            const WINDOW_NUM_BITS: usize,
+            const NUM_WINDOWS: usize,
+        > Circuit<F> for MyCircuit<F, WORD_NUM_BITS, WINDOW_NUM_BITS, NUM_WINDOWS>
         {
             type Config = RunningSumConfig<F, WINDOW_NUM_BITS>;
             type FloorPlanner = SimpleFloorPlanner;

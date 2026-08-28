@@ -1,4 +1,4 @@
-use super::{util::*, AssignedBits};
+use super::{AssignedBits, util::*};
 
 use group::ff::{Field, PrimeField};
 use halo2_proofs::{
@@ -290,7 +290,7 @@ impl SpreadTableConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{get_tag, SpreadTableChip, SpreadTableConfig};
+    use super::{SpreadTableChip, SpreadTableConfig, get_tag};
     use rand::RngExt;
 
     use group::ff::PrimeField;

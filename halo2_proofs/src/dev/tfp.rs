@@ -4,7 +4,7 @@ use ff::Field;
 use tracing::{debug, debug_span, span::EnteredSpan};
 
 use crate::{
-    circuit::{layouter::RegionLayouter, AssignedCell, Cell, Layouter, Region, Table, Value},
+    circuit::{AssignedCell, Cell, Layouter, Region, Table, Value, layouter::RegionLayouter},
     plonk::{
         Advice, Any, Assigned, Assignment, Circuit, Column, ConstraintSystem, Error, Fixed,
         FloorPlanner, Instance, Selector,

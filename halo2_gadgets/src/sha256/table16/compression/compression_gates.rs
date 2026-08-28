@@ -1,4 +1,4 @@
-use super::super::{util::*, Gate};
+use super::super::{Gate, util::*};
 
 use group::ff::{Field, PrimeField};
 use halo2_proofs::plonk::{Constraint, Constraints, Expression};

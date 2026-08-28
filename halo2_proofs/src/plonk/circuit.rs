@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
 };
 
-use super::{lookup, permutation, Assigned, Error};
+use super::{Assigned, Error, lookup, permutation};
 use crate::{
     circuit::{Layouter, Region, Value},
     poly::Rotation,

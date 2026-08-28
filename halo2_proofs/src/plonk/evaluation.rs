@@ -234,13 +234,13 @@ fn deferred_inner_product<F: DeferredField>(polynomial: &[F], powers: &[F]) -> F
 #[cfg(test)]
 mod tests {
     use super::{
-        deferred_inner_product, EvaluationPoint, EvaluationQuery, PolynomialEvaluator, PowerTables,
-        LAST_POINT_INDEX,
+        EvaluationPoint, EvaluationQuery, LAST_POINT_INDEX, PolynomialEvaluator, PowerTables,
+        deferred_inner_product,
     };
     use crate::{arithmetic::eval_polynomial, poly::EvaluationDomain};
     use ff::Field;
     use pasta_curves::pallas;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
     fn deferred_evaluation_matches_horner() {

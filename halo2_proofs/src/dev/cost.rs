@@ -12,7 +12,7 @@ use ff::{Field, PrimeField};
 use group::prime::PrimeGroup;
 
 use crate::{
-    circuit::{layouter::RegionColumn, Value},
+    circuit::{Value, layouter::RegionColumn},
     plonk::{
         Advice, Any, Assigned, Assignment, Circuit, Column, ConstraintSystem, Error, Fixed,
         FloorPlanner, Instance, Selector,

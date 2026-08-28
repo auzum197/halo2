@@ -530,15 +530,15 @@ pub(crate) mod tests {
     use rand::rng;
 
     use super::{
-        chip::{SinsemillaChip, SinsemillaConfig},
         CommitDomain, CommitDomains, HashDomain, HashDomains, Message, MessagePiece,
+        chip::{SinsemillaChip, SinsemillaConfig},
     };
 
     use crate::{
         ecc::{
+            CircuitVersion, NonIdentityPoint, ScalarFixed,
             chip::{EccChip, EccConfig, H, NUM_WINDOWS},
             tests::{FullWidth, TestFixedBases},
-            CircuitVersion, NonIdentityPoint, ScalarFixed,
         },
         sinsemilla::primitives::{self as sinsemilla, K},
         test_circuits::test_utils::{test_against_stored_circuit, test_zs_and_us},
@@ -547,7 +547,7 @@ pub(crate) mod tests {
         },
     };
 
-    use group::{ff::Field, Curve};
+    use group::{Curve, ff::Field};
     use pasta_curves::pallas;
 
     use std::convert::TryInto;

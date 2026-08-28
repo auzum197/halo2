@@ -8,7 +8,7 @@ use pasta_curves::arithmetic::CurveAffine;
 
 use super::{HashDomains, SinsemillaInstructions};
 
-use crate::utilities::{cond_swap::CondSwapInstructions, i2lebsp, UtilitiesInstructions};
+use crate::utilities::{UtilitiesInstructions, cond_swap::CondSwapInstructions, i2lebsp};
 
 pub mod chip;
 
@@ -64,13 +64,13 @@ pub struct MerklePath<
 }
 
 impl<
-        C: CurveAffine,
-        MerkleChip,
-        const PATH_LENGTH: usize,
-        const K: usize,
-        const MAX_WORDS: usize,
-        const PAR: usize,
-    > MerklePath<C, MerkleChip, PATH_LENGTH, K, MAX_WORDS, PAR>
+    C: CurveAffine,
+    MerkleChip,
+    const PATH_LENGTH: usize,
+    const K: usize,
+    const MAX_WORDS: usize,
+    const PAR: usize,
+> MerklePath<C, MerkleChip, PATH_LENGTH, K, MAX_WORDS, PAR>
 where
     MerkleChip: MerkleInstructions<C, PATH_LENGTH, K, MAX_WORDS> + Clone,
 {
@@ -99,13 +99,13 @@ where
 
 #[allow(non_snake_case)]
 impl<
-        C: CurveAffine,
-        MerkleChip,
-        const PATH_LENGTH: usize,
-        const K: usize,
-        const MAX_WORDS: usize,
-        const PAR: usize,
-    > MerklePath<C, MerkleChip, PATH_LENGTH, K, MAX_WORDS, PAR>
+    C: CurveAffine,
+    MerkleChip,
+    const PATH_LENGTH: usize,
+    const K: usize,
+    const MAX_WORDS: usize,
+    const PAR: usize,
+> MerklePath<C, MerkleChip, PATH_LENGTH, K, MAX_WORDS, PAR>
 where
     MerkleChip: MerkleInstructions<C, PATH_LENGTH, K, MAX_WORDS> + Clone,
 {
@@ -174,25 +174,24 @@ where
 /// Sinsemilla Merkle tree tests.
 pub mod tests {
     use super::{
-        chip::{MerkleChip, MerkleConfig},
         MerklePath,
+        chip::{MerkleChip, MerkleConfig},
     };
 
     use crate::{
         ecc::tests::TestFixedBases,
         sinsemilla::{
+            HashDomains,
             chip::SinsemillaChip,
             tests::{TestCommitDomain, TestHashDomain},
-            HashDomains,
         },
         test_circuits::test_utils::test_against_stored_circuit,
         utilities::{
-            i2lebsp,
+            UtilitiesInstructions, i2lebsp,
             lookup_range_check::{
                 PallasLookupRangeCheck, PallasLookupRangeCheck4_5BConfig,
                 PallasLookupRangeCheckConfig,
             },
-            UtilitiesInstructions,
         },
     };
 
@@ -204,7 +203,7 @@ pub mod tests {
         plonk::{Circuit, ConstraintSystem, Error},
     };
 
-    use rand::{rng, Rng};
+    use rand::{Rng, rng};
     use std::{convert::TryInto, iter, marker::PhantomData};
 
     const MERKLE_DEPTH: usize = 32;
@@ -572,8 +571,8 @@ pub mod tests {
         }
     }
 
-    fn generate_circuit_4_5b<Lookup: PallasLookupRangeCheck>(
-    ) -> MyMerkleCircuitWithHashFromPrivatePoint<Lookup> {
+    fn generate_circuit_4_5b<Lookup: PallasLookupRangeCheck>()
+    -> MyMerkleCircuitWithHashFromPrivatePoint<Lookup> {
         let mut rng = rng();
 
         // Choose a random leaf and position

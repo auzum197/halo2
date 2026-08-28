@@ -18,11 +18,7 @@ impl<F: PrimeField> Gate<F> {
         let deg = points.len();
 
         fn factorial(n: u64) -> u64 {
-            if n < 2 {
-                1
-            } else {
-                n * factorial(n - 1)
-            }
+            if n < 2 { 1 } else { n * factorial(n - 1) }
         }
 
         // Scale the whole expression by factor to avoid divisions

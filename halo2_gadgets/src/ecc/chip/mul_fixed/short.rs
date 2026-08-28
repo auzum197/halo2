@@ -206,7 +206,7 @@ impl<Fixed: FixedPoints<pallas::Affine>> Config<Fixed> {
         // tested at the circuit-level.
         {
             use super::super::FixedPoint;
-            use group::{ff::PrimeField, Curve};
+            use group::{Curve, ff::PrimeField};
 
             scalar
                 .magnitude
@@ -307,7 +307,7 @@ impl<Fixed: FixedPoints<pallas::Affine>> Config<Fixed> {
 
 #[cfg(test)]
 pub mod tests {
-    use group::{ff::PrimeField, Curve, Group};
+    use group::{Curve, Group, ff::PrimeField};
     use halo2_proofs::{
         arithmetic::CurveAffine,
         circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value},
@@ -319,16 +319,16 @@ pub mod tests {
 
     use crate::{
         ecc::{
+            CircuitVersion, FixedPointShort, NonIdentityPoint, Point, ScalarFixedShort,
             chip::{EccChip, EccConfig, FixedPoint, MagnitudeSign},
             tests::{Short, TestFixedBases},
-            CircuitVersion, FixedPointShort, NonIdentityPoint, Point, ScalarFixedShort,
         },
         utilities::{
+            UtilitiesInstructions,
             lookup_range_check::{
                 PallasLookupRangeCheck, PallasLookupRangeCheck4_5BConfig,
                 PallasLookupRangeCheckConfig,
             },
-            UtilitiesInstructions,
         },
     };
 

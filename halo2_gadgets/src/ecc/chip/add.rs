@@ -332,7 +332,7 @@ pub mod tests {
     };
     use pasta_curves::{arithmetic::CurveExt, pallas};
 
-    use crate::ecc::{chip::EccPoint, EccInstructions, NonIdentityPoint};
+    use crate::ecc::{EccInstructions, NonIdentityPoint, chip::EccPoint};
 
     #[allow(clippy::too_many_arguments)]
     pub fn test_add<

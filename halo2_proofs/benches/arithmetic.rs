@@ -7,7 +7,7 @@ use crate::poly::commitment::Params;
 use group::ff::Field;
 use halo2_proofs::*;
 
-use criterion::{black_box, Criterion};
+use criterion::{Criterion, black_box};
 use rand::rng;
 
 fn criterion_benchmark(c: &mut Criterion) {

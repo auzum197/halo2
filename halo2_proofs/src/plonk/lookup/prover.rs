@@ -1,21 +1,20 @@
 use super::super::{
-    circuit::Expression, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX, Error,
-    ProvingKey,
+    ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX, Error, ProvingKey,
+    circuit::Expression,
 };
 use super::Argument;
 use crate::{
-    arithmetic::{parallelize, CurveAffine},
+    arithmetic::{CurveAffine, parallelize},
     plonk::evaluation::{EvaluationPoint, EvaluationQuery, PolynomialEvaluator},
     poly::{
-        self,
+        self, Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation,
         commitment::{Blind, Params},
         multiopen::ProverQuery,
-        Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation,
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
 use ff::WithSmallOrderMulGroup;
-use group::{ff::Field, Curve};
+use group::{Curve, ff::Field};
 use rand_core::Rng;
 use std::{
     iter,

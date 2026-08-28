@@ -1,5 +1,5 @@
 use super::Params;
-use crate::arithmetic::{best_multiexp, CurveAffine};
+use crate::arithmetic::{CurveAffine, best_multiexp};
 use ff::Field;
 use group::Group;
 
@@ -55,15 +55,16 @@ fn canonicalize_other<C: CurveAffine>(mut terms: Vec<ArbitraryTerm<C>>) -> Vec<A
     let mut canonical = Vec::with_capacity(terms.len());
     for (x, (scalar, y)) in terms {
         if let Some((our_x, (our_scalar, our_y))) = canonical.last_mut()
-            && *our_x == x {
-                if *our_y == y {
-                    *our_scalar += scalar;
-                } else {
-                    assert!(*our_y == -y);
-                    *our_scalar -= scalar;
-                }
-                continue;
+            && *our_x == x
+        {
+            if *our_y == y {
+                *our_scalar += scalar;
+            } else {
+                assert!(*our_y == -y);
+                *our_scalar -= scalar;
             }
+            continue;
+        }
         canonical.push((x, (scalar, y)));
     }
 
@@ -315,46 +316,47 @@ impl<'a, C: CurveAffine> MSM<'a, C> {
         // arming is never a pessimization.
         #[cfg(feature = "orbits")]
         if crate::multicore::current_num_threads() <= PREPARED_MSM_MAX_THREADS
-            && let Some(prepared) = self.params.zero_check() {
-                let n = self.params.n as usize;
-                if prepared.terms() == n + 2 {
-                    if !self.batched_other.is_empty() {
-                        // Canonicalize in place rather than on a clone: the
-                        // merged view serves the prepared check's extras, and
-                        // if the guard below falls through, `multiexp`
-                        // re-canonicalizes the already-canonical buffer, which
-                        // is idempotent.
-                        let mut combined = std::mem::take(&mut self.batched_other);
-                        combined.extend(self.other.iter().map(|(x, values)| (*x, *values)));
-                        self.other.clear();
-                        self.batched_other = canonicalize_other::<C>(combined);
+            && let Some(prepared) = self.params.zero_check()
+        {
+            let n = self.params.n as usize;
+            if prepared.terms() == n + 2 {
+                if !self.batched_other.is_empty() {
+                    // Canonicalize in place rather than on a clone: the
+                    // merged view serves the prepared check's extras, and
+                    // if the guard below falls through, `multiexp`
+                    // re-canonicalizes the already-canonical buffer, which
+                    // is idempotent.
+                    let mut combined = std::mem::take(&mut self.batched_other);
+                    combined.extend(self.other.iter().map(|(x, values)| (*x, *values)));
+                    self.other.clear();
+                    self.batched_other = canonicalize_other::<C>(combined);
+                }
+                let extra: Vec<(C::Scalar, C)> = if self.batched_other.is_empty() {
+                    self.other
+                        .iter()
+                        .map(|(x, (scalar, y))| (*scalar, C::from_xy(*x, *y).unwrap()))
+                        .collect()
+                } else {
+                    self.batched_other
+                        .iter()
+                        .map(|(x, (scalar, y))| (*scalar, C::from_xy(*x, *y).unwrap()))
+                        .collect()
+                };
+                if extra.len() <= n {
+                    let mut fixed = vec![C::Scalar::ZERO; n + 2];
+                    if let Some(g_scalars) = &self.g_scalars {
+                        fixed[..n].copy_from_slice(g_scalars);
                     }
-                    let extra: Vec<(C::Scalar, C)> = if self.batched_other.is_empty() {
-                        self.other
-                            .iter()
-                            .map(|(x, (scalar, y))| (*scalar, C::from_xy(*x, *y).unwrap()))
-                            .collect()
-                    } else {
-                        self.batched_other
-                            .iter()
-                            .map(|(x, (scalar, y))| (*scalar, C::from_xy(*x, *y).unwrap()))
-                            .collect()
-                    };
-                    if extra.len() <= n {
-                        let mut fixed = vec![C::Scalar::ZERO; n + 2];
-                        if let Some(g_scalars) = &self.g_scalars {
-                            fixed[..n].copy_from_slice(g_scalars);
-                        }
-                        if let Some(w_scalar) = self.w_scalar {
-                            fixed[n] = w_scalar;
-                        }
-                        if let Some(u_scalar) = self.u_scalar {
-                            fixed[n + 1] = u_scalar;
-                        }
-                        return prepared.is_zero_with_terms_vartime(&fixed, &extra);
+                    if let Some(w_scalar) = self.w_scalar {
+                        fixed[n] = w_scalar;
                     }
+                    if let Some(u_scalar) = self.u_scalar {
+                        fixed[n + 1] = u_scalar;
+                    }
+                    return prepared.is_zero_with_terms_vartime(&fixed, &extra);
                 }
             }
+        }
 
         bool::from(self.multiexp().is_identity())
     }
@@ -393,9 +395,9 @@ impl<'a, C: CurveAffine> MSM<'a, C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::poly::commitment::{Params, MSM};
+    use crate::poly::commitment::{MSM, Params};
     use group::Curve;
-    use pasta_curves::{arithmetic::CurveAffine, EpAffine, Fp, Fq};
+    use pasta_curves::{EpAffine, Fp, Fq, arithmetic::CurveAffine};
 
     #[test]
     fn msm_arithmetic() {

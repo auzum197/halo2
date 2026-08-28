@@ -3,15 +3,15 @@ use group::Curve;
 use std::iter;
 
 use super::{
-    commit_instance, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX,
-    ChallengeY, Error, VerifyingKey,
+    ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX, ChallengeY, Error, VerifyingKey,
+    commit_instance, vanishing,
 };
 use crate::arithmetic::CurveAffine;
 use crate::poly::{
-    commitment::{Guard, Params, MSM},
+    commitment::{Guard, MSM, Params},
     multiopen::{self, VerifierQuery},
 };
-use crate::transcript::{read_n_points, read_n_scalars, EncodedChallenge, TranscriptRead};
+use crate::transcript::{EncodedChallenge, TranscriptRead, read_n_points, read_n_scalars};
 
 #[cfg(feature = "batch")]
 mod batch;
@@ -181,10 +181,12 @@ fn verify_proof_with_instance_commitments<
     transcript: &mut T,
 ) -> Result<V::Output, Error> {
     debug_assert_eq!(instance_commitments.len(), instances.len());
-    debug_assert!(instance_commitments
-        .iter()
-        .zip(instances)
-        .all(|(commitments, instances)| commitments.len() == instances.len()));
+    debug_assert!(
+        instance_commitments
+            .iter()
+            .zip(instances)
+            .all(|(commitments, instances)| commitments.len() == instances.len())
+    );
 
     let num_proofs = instance_commitments.len();
 
@@ -422,17 +424,17 @@ fn verify_proof_with_instance_commitments<
 
 #[cfg(test)]
 mod tests {
-    use super::{commit_instance, verify_proof, SingleVerifier, MIN_BATCH_NORMALIZE};
+    use super::{MIN_BATCH_NORMALIZE, SingleVerifier, commit_instance, verify_proof};
     use crate::{
         circuit::{Layouter, SimpleFloorPlanner, Value},
         pasta::{EqAffine, Fp},
         plonk::{
-            create_proof, keygen_pk, keygen_vk, Advice, Circuit, Column, ConstraintSystem, Error,
-            Instance,
+            Advice, Circuit, Column, ConstraintSystem, Error, Instance, create_proof, keygen_pk,
+            keygen_vk,
         },
         poly::{
-            commitment::{Blind, Params},
             EvaluationDomain,
+            commitment::{Blind, Params},
         },
         transcript::{Blake2bRead, Blake2bWrite, Challenge255},
     };

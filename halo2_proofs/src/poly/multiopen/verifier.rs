@@ -1,12 +1,12 @@
 use ff::{BatchInvert, Field};
 
 use super::super::{
-    commitment::{Guard, Params, MSM},
     Error,
+    commitment::{Guard, MSM, Params},
 };
 use super::{
-    construct_intermediate_sets, ChallengeX1, ChallengeX2, ChallengeX3, ChallengeX4,
-    CommitmentReference, Query, VerifierQuery,
+    ChallengeX1, ChallengeX2, ChallengeX3, ChallengeX4, CommitmentReference, Query, VerifierQuery,
+    construct_intermediate_sets,
 };
 use crate::arithmetic::CurveAffine;
 use crate::transcript::{EncodedChallenge, TranscriptRead};
@@ -230,8 +230,8 @@ mod tests {
     use group::CurveAffine;
 
     use super::{
-        compute_msm_eval, verify_proof, ChallengeX1, ChallengeX2, ChallengeX3, Error, Params,
-        VerifierQuery,
+        ChallengeX1, ChallengeX2, ChallengeX3, Error, Params, VerifierQuery, compute_msm_eval,
+        verify_proof,
     };
     use crate::{
         arithmetic::{eval_polynomial, lagrange_interpolate},

@@ -1,4 +1,4 @@
-use super::super::{EccPoint, EccScalarFixed, FixedPoints, FIXED_BASE_WINDOW_SIZE, H, NUM_WINDOWS};
+use super::super::{EccPoint, EccScalarFixed, FIXED_BASE_WINDOW_SIZE, FixedPoints, H, NUM_WINDOWS};
 
 use crate::utilities::{decompose_word, range_check};
 use arrayvec::ArrayVec;
@@ -179,7 +179,7 @@ impl<Fixed: FixedPoints<pallas::Affine>> Config<Fixed> {
 
 #[cfg(test)]
 pub mod tests {
-    use group::{ff::Field, Curve};
+    use group::{Curve, ff::Field};
     use halo2_proofs::{
         circuit::{Layouter, Value},
         plonk::Error,
@@ -189,9 +189,9 @@ pub mod tests {
 
     use crate::{
         ecc::{
+            FixedPoint, NonIdentityPoint, Point, ScalarFixed,
             chip::{EccChip, FixedPoint as _, H},
             tests::{FullWidth, TestFixedBases},
-            FixedPoint, NonIdentityPoint, Point, ScalarFixed,
         },
         utilities::lookup_range_check::PallasLookupRangeCheck,
     };

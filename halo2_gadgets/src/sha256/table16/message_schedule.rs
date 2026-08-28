@@ -1,6 +1,6 @@
 use std::convert::TryInto;
 
-use super::{super::BLOCK_SIZE, AssignedBits, BlockWord, SpreadInputs, Table16Assignment, ROUNDS};
+use super::{super::BLOCK_SIZE, AssignedBits, BlockWord, ROUNDS, SpreadInputs, Table16Assignment};
 use halo2_proofs::{
     circuit::Layouter,
     pasta::pallas,
@@ -394,7 +394,7 @@ impl MessageScheduleConfig {
 #[cfg(test)]
 mod tests {
     use super::super::{
-        super::BLOCK_SIZE, util::lebs2ip, BlockWord, SpreadTableChip, Table16Chip, Table16Config,
+        super::BLOCK_SIZE, BlockWord, SpreadTableChip, Table16Chip, Table16Config, util::lebs2ip,
     };
     use super::schedule_util::*;
     use halo2_proofs::{

@@ -3,8 +3,8 @@
 
 pub use ff::Field;
 use group::{
-    ff::{BatchInvert, PrimeField},
     Group as _, GroupOpsOwned, ScalarMulOwned,
+    ff::{BatchInvert, PrimeField},
 };
 use maybe_rayon::prelude::*;
 pub use pasta_curves::arithmetic::*;
@@ -558,12 +558,12 @@ pub(crate) fn batch_invert_multi<F: Field>(values: &mut [F]) {
     if let (Some(value), Some(slot)) = (
         values.chunks_exact_mut(2).into_remainder().first_mut(),
         scratch.chunks_exact(2).remainder().first(),
-    )
-        && !value.is_zero_vartime() {
-            let inverted = acc0 * slot;
-            acc0 *= *value;
-            *value = inverted;
-        }
+    ) && !value.is_zero_vartime()
+    {
+        let inverted = acc0 * slot;
+        acc0 *= *value;
+        *value = inverted;
+    }
     for (pair, slots) in values
         .chunks_exact_mut(2)
         .zip(scratch.chunks_exact(2))

@@ -2,8 +2,8 @@
 
 use super::{BaseFitsInScalarInstructions, EccInstructions, FixedPoints};
 use crate::utilities::{
-    lookup_range_check::{PallasLookupRangeCheck, PallasLookupRangeCheckConfig},
     UtilitiesInstructions,
+    lookup_range_check::{PallasLookupRangeCheck, PallasLookupRangeCheckConfig},
 };
 use arrayvec::ArrayVec;
 
