@@ -33,5 +33,5 @@ than continuing the upstream `0.1.0` numbering.
   `Spec`, `Domain`, `Hash`, and the sponge APIs now refer to the 0.14 traits.
 - Replaced the upstream `pasta_curves` dependency with the Zakura fork
   (`zakura-pasta-curves` 1.0.0), whose types appear in this crate's API.
-- Raised the minimum supported Rust version to 1.88 and migrated the crate to
+- Raised the minimum supported Rust version to 1.91 and migrated the crate to
   the 2024 edition.
