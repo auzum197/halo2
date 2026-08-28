@@ -762,14 +762,13 @@ fn reduce_deferred<T: DeferredField + 'static, F: Field>(
 
 impl<E: Copy, F: Field, B: Basis> EvaluationPlan<E, F, B> {
     fn compile(ast: &Ast<E, F, B>) -> Self {
-        if let Ast::Add(_, _) = ast {
-            if let Some(polynomial) = expanded_polynomial(ast) {
+        if let Ast::Add(_, _) = ast
+            && let Some(polynomial) = expanded_polynomial(ast) {
                 return Self::Horner {
                     base: Box::new(Self::compile(polynomial.base)),
                     coefficients: polynomial.coefficients,
                 };
             }
-        }
 
         match ast {
             Ast::Poly(leaf) => Self::Poly(*leaf),
@@ -1264,13 +1263,12 @@ fn apply_cache_actions<E, F: Field, B: Basis>(
 ) {
     let action = actions[*occurrence];
     *occurrence += 1;
-    if let Some(action) = action {
-        if !action.store {
+    if let Some(action) = action
+        && !action.store {
             *plan = EvaluationPlan::CacheLoad { slot: action.slot };
             *occurrence = action.end;
             return;
         }
-    }
 
     match plan {
         EvaluationPlan::Add(lhs, rhs) | EvaluationPlan::Mul(lhs, rhs) => {
@@ -1726,8 +1724,8 @@ impl<'poly, E, F: Field, B: Basis> Evaluator<'poly, E, F, B> {
                 ),
                 EvaluationPlan::Add(a, b) => {
                     recurse_into(a, ctx, output, cache, scratch);
-                    if let EvaluationPlan::Scale(negated_rhs, scalar) = b.as_ref() {
-                        if *scalar == ctx.minus_one {
+                    if let EvaluationPlan::Scale(negated_rhs, scalar) = b.as_ref()
+                        && *scalar == ctx.minus_one {
                             if let EvaluationPlan::Poly(leaf) = negated_rhs.as_ref() {
                                 let chunk = leaf_chunk(leaf, ctx, output.len());
                                 for (lhs, rhs) in output.iter_mut().zip(chunk.iter()) {
@@ -1743,7 +1741,6 @@ impl<'poly, E, F: Field, B: Basis> Evaluator<'poly, E, F, B> {
                             }
                             return;
                         }
-                    }
 
                     if let EvaluationPlan::Poly(leaf) = b.as_ref() {
                         let chunk = leaf_chunk(leaf, ctx, output.len());
@@ -1762,16 +1759,14 @@ impl<'poly, E, F: Field, B: Basis> Evaluator<'poly, E, F, B> {
                 EvaluationPlan::Mul(a, b) => {
                     // Preserve the multiplication shape while avoiding a
                     // constant vector for scalars with cheap field operations.
-                    if let EvaluationPlan::ConstantTerm(scalar) = a.as_ref() {
-                        if recurse_small_scale_into(b, *scalar, ctx, output, cache, scratch) {
+                    if let EvaluationPlan::ConstantTerm(scalar) = a.as_ref()
+                        && recurse_small_scale_into(b, *scalar, ctx, output, cache, scratch) {
                             return;
                         }
-                    }
-                    if let EvaluationPlan::ConstantTerm(scalar) = b.as_ref() {
-                        if recurse_small_scale_into(a, *scalar, ctx, output, cache, scratch) {
+                    if let EvaluationPlan::ConstantTerm(scalar) = b.as_ref()
+                        && recurse_small_scale_into(a, *scalar, ctx, output, cache, scratch) {
                             return;
                         }
-                    }
 
                     if let (EvaluationPlan::Poly(lhs), EvaluationPlan::Poly(rhs)) =
                         (a.as_ref(), b.as_ref())

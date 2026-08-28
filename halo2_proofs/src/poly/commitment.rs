@@ -341,8 +341,8 @@ impl<C: CurveAffine> Params<C> {
         // `PREPARED_MSM_MAX_THREADS` effective threads the planned
         // multiexp out-scales the prepared evaluation.
         #[cfg(feature = "orbits")]
-        if crate::multicore::current_num_threads() <= msm::PREPARED_MSM_MAX_THREADS {
-            if let Some(prepared) = self.zero_check() {
+        if crate::multicore::current_num_threads() <= msm::PREPARED_MSM_MAX_THREADS
+            && let Some(prepared) = self.zero_check() {
                 let n = self.n as usize;
                 if prepared.terms() == n + 2 && poly.len() == n {
                     let mut fixed = Vec::with_capacity(n + 2);
@@ -352,7 +352,6 @@ impl<C: CurveAffine> Params<C> {
                     return prepared.multiexp_with_terms_vartime(&fixed, &[]);
                 }
             }
-        }
 
         let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
         let mut tmp_bases = Vec::with_capacity(poly.len() + 1);
@@ -378,8 +377,8 @@ impl<C: CurveAffine> Params<C> {
         // over the [g_lagrange..., w, u] table built by
         // `Params::prepare_commitments`; same thread gate.
         #[cfg(feature = "orbits")]
-        if crate::multicore::current_num_threads() <= msm::PREPARED_MSM_MAX_THREADS {
-            if let Some(prepared) = self.lagrange_table() {
+        if crate::multicore::current_num_threads() <= msm::PREPARED_MSM_MAX_THREADS
+            && let Some(prepared) = self.lagrange_table() {
                 let n = self.n as usize;
                 if prepared.terms() == n + 2 && poly.len() == n {
                     let mut fixed = Vec::with_capacity(n + 2);
@@ -389,7 +388,6 @@ impl<C: CurveAffine> Params<C> {
                     return prepared.multiexp_with_terms_vartime(&fixed, &[]);
                 }
             }
-        }
 
         let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
         let mut tmp_bases = Vec::with_capacity(poly.len() + 1);
