@@ -460,6 +460,11 @@ fn plonk_api() {
     };
     assert_eq!(prover.verify(), Ok(()));
 
+    // Committed stored-proof fixture, regenerated only on demand by setting
+    // HALO2_PLONK_TEST_GENERATE_NEW_PROOF; the check below verifies that
+    // proofs serialized by earlier releases keep verifying.
+    let proof_fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/plonk_api_proof.bin");
+
     if std::env::var_os("HALO2_PLONK_TEST_GENERATE_NEW_PROOF").is_some() {
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         // Create a proof
@@ -474,14 +479,13 @@ fn plonk_api() {
         .expect("proof generation should not fail");
         let proof: Vec<u8> = transcript.finalize();
 
-        std::fs::write("./tests/plonk_api_proof.bin", &proof[..])
+        std::fs::write(proof_fixture_path, &proof[..])
             .expect("should succeed to write new proof");
     }
 
     {
         // Check that a hardcoded proof is satisfied
-        let proof =
-            std::fs::read("./tests/plonk_api_proof.bin").expect("should succeed to read proof");
+        let proof = std::fs::read(proof_fixture_path).expect("should succeed to read proof");
         let strategy = SingleVerifier::new(&params);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
         assert!(verify_proof(
