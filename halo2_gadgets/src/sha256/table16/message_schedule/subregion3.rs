@@ -1,5 +1,5 @@
-use super::super::{util::*, AssignedBits, Bits, SpreadVar, SpreadWord, Table16Assignment};
-use super::{schedule_util::*, MessageScheduleConfig, MessageWord};
+use super::super::{AssignedBits, Bits, SpreadVar, SpreadWord, Table16Assignment, util::*};
+use super::{MessageScheduleConfig, MessageWord, schedule_util::*};
 use halo2_proofs::{
     circuit::{Region, Value},
     pasta::pallas,

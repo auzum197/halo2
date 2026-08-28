@@ -1,5 +1,5 @@
 use super::super::{super::DIGEST_SIZE, BlockWord, RoundWordDense};
-use super::{compression_util::*, CompressionConfig, State};
+use super::{CompressionConfig, State, compression_util::*};
 use halo2_proofs::{
     circuit::{Region, Value},
     pasta::pallas,

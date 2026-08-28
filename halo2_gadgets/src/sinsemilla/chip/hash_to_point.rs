@@ -718,7 +718,7 @@ where
     ) {
         // Check equivalence to result from primitives::sinsemilla::hash_to_point
         {
-            use crate::sinsemilla::primitives::{lebs2ip_k, K, S_PERSONALIZATION};
+            use crate::sinsemilla::primitives::{K, S_PERSONALIZATION, lebs2ip_k};
 
             use group::ff::PrimeFieldBits;
             use group::{Curve, CurveAffine as _};
@@ -807,15 +807,15 @@ impl<F: Field> Deref for Y<F> {
 #[cfg(test)]
 mod tests {
     use super::{
-        decompose_words,
+        ProjectivePoint, decompose_words,
         first_word_witnesses::{MERKLE_FIRST_WORD_COUNT, MERKLE_FIRST_WORD_WITNESSES},
-        has_merkle_initial_q, ProjectivePoint,
+        has_merkle_initial_q,
     };
-    use crate::sinsemilla::primitives::{lebs2ip_k, K, SINSEMILLA_S};
+    use crate::sinsemilla::primitives::{K, SINSEMILLA_S, lebs2ip_k};
 
     use group::{
-        ff::{Field, PrimeField, PrimeFieldBits},
         Curve, Group,
+        ff::{Field, PrimeField, PrimeFieldBits},
     };
     use halo2_proofs::plonk::Assigned;
     use pasta_curves::{arithmetic::CurveAffine, pallas};

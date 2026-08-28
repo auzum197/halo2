@@ -1,13 +1,14 @@
 //! Chip implementations for the Sinsemilla gadgets.
 
 use super::{
+    CommitDomains, HashDomains, SinsemillaInstructions,
     message::{Message, MessagePiece},
-    primitives as sinsemilla, CommitDomains, HashDomains, SinsemillaInstructions,
+    primitives as sinsemilla,
 };
 use crate::{
     ecc::{
-        chip::{DoubleAndAdd, NonIdentityEccPoint},
         FixedPoints,
+        chip::{DoubleAndAdd, NonIdentityEccPoint},
     },
     utilities::lookup_range_check::{PallasLookupRangeCheck, PallasLookupRangeCheckConfig},
 };

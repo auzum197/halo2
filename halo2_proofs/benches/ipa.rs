@@ -1,13 +1,13 @@
 #[macro_use]
 extern crate criterion;
 
-use criterion::{black_box, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box};
 use ff::Field;
 use group::Curve;
 use halo2_proofs::pasta::{EqAffine, Fp};
 use halo2_proofs::poly::{
-    commitment::{create_proof, Blind, Params},
     EvaluationDomain,
+    commitment::{Blind, Params, create_proof},
 };
 use halo2_proofs::transcript::{Blake2bWrite, Challenge255, Transcript, TranscriptWrite};
 use rand::rng;

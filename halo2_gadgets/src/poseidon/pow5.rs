@@ -11,8 +11,8 @@ use halo2_proofs::{
 };
 
 use super::{
-    primitives::{Absorbing, Domain, Mds, Spec, Squeezing, State},
     PaddedWord, PoseidonInstructions, PoseidonSpongeInstructions,
+    primitives::{Absorbing, Domain, Mds, Spec, Squeezing, State},
 };
 use crate::utilities::Var;
 
@@ -263,13 +263,8 @@ impl<F: Field, S: Spec<F, WIDTH, RATE>, const WIDTH: usize, const RATE: usize>
     }
 }
 
-impl<
-        F: Field,
-        S: Spec<F, WIDTH, RATE>,
-        D: Domain<F, RATE>,
-        const WIDTH: usize,
-        const RATE: usize,
-    > PoseidonSpongeInstructions<F, S, D, WIDTH, RATE> for Pow5Chip<F, WIDTH, RATE>
+impl<F: Field, S: Spec<F, WIDTH, RATE>, D: Domain<F, RATE>, const WIDTH: usize, const RATE: usize>
+    PoseidonSpongeInstructions<F, S, D, WIDTH, RATE> for Pow5Chip<F, WIDTH, RATE>
 {
     fn initial_state(
         &self,
@@ -596,13 +591,13 @@ mod tests {
         poly::commitment::Params,
         transcript::{Blake2bRead, Blake2bWrite, Challenge255},
     };
-    use pasta_curves::{pallas, EqAffine};
+    use pasta_curves::{EqAffine, pallas};
     use rand::rng;
 
     use super::{PoseidonInstructions, Pow5Chip, Pow5Config, StateWord};
     use crate::poseidon::{
-        primitives::{self as poseidon, ConstantLength, P128Pow5T3 as OrchardNullifier, Spec},
         Hash,
+        primitives::{self as poseidon, ConstantLength, P128Pow5T3 as OrchardNullifier, Spec},
     };
     use std::convert::TryInto;
     use std::marker::PhantomData;

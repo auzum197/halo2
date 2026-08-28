@@ -8,13 +8,14 @@ use halo2_proofs::circuit::{Cell, Layouter, SimpleFloorPlanner, Value};
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::pasta::{Eq, EqAffine, Fp};
 #[cfg(feature = "unstable-verifier-fingerprint")]
-use halo2_proofs::plonk::fingerprint::{capture_proof_fingerprint, ChallengeRecorder};
+use halo2_proofs::plonk::fingerprint::{ChallengeRecorder, capture_proof_fingerprint};
 use halo2_proofs::plonk::{
-    create_proof, keygen_pk, keygen_vk, verify_proof, Advice, Assigned, BatchVerifier, Circuit,
-    Column, ConstraintSystem, Error, Fixed, SingleVerifier, TableColumn, VerificationStrategy,
+    Advice, Assigned, BatchVerifier, Circuit, Column, ConstraintSystem, Error, Fixed,
+    SingleVerifier, TableColumn, VerificationStrategy, create_proof, keygen_pk, keygen_vk,
+    verify_proof,
 };
 use halo2_proofs::poly::commitment::{Guard, MSM};
-use halo2_proofs::poly::{commitment::Params, Rotation};
+use halo2_proofs::poly::{Rotation, commitment::Params};
 use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, EncodedChallenge};
 use rand::rng;
 use std::marker::PhantomData;
@@ -479,8 +480,7 @@ fn plonk_api() {
         .expect("proof generation should not fail");
         let proof: Vec<u8> = transcript.finalize();
 
-        std::fs::write(proof_fixture_path, &proof[..])
-            .expect("should succeed to write new proof");
+        std::fs::write(proof_fixture_path, &proof[..]).expect("should succeed to write new proof");
     }
 
     {
@@ -488,14 +488,16 @@ fn plonk_api() {
         let proof = std::fs::read(proof_fixture_path).expect("should succeed to read proof");
         let strategy = SingleVerifier::new(&params);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        assert!(verify_proof(
-            &params,
-            pk.get_vk(),
-            strategy,
-            &[&[&pubinputs[..]], &[&pubinputs[..]]],
-            &mut transcript,
-        )
-        .is_ok());
+        assert!(
+            verify_proof(
+                &params,
+                pk.get_vk(),
+                strategy,
+                &[&[&pubinputs[..]], &[&pubinputs[..]]],
+                &mut transcript,
+            )
+            .is_ok()
+        );
     }
 
     for _ in 0..10 {
@@ -522,14 +524,16 @@ fn plonk_api() {
         {
             let strategy = SingleVerifier::new(&params);
             let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-            assert!(verify_proof(
-                &params,
-                pk.get_vk(),
-                strategy,
-                &[&[&pubinputs[..]], &[&pubinputs[..]]],
-                &mut transcript,
-            )
-            .is_ok());
+            assert!(
+                verify_proof(
+                    &params,
+                    pk.get_vk(),
+                    strategy,
+                    &[&[&pubinputs[..]], &[&pubinputs[..]]],
+                    &mut transcript,
+                )
+                .is_ok()
+            );
         }
 
         //
@@ -571,14 +575,16 @@ fn plonk_api() {
         {
             let strategy = AccumulationVerifier::new(&params);
             let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-            assert!(verify_proof(
-                &params,
-                pk.get_vk(),
-                strategy,
-                &[&[&pubinputs[..]], &[&pubinputs[..]]],
-                &mut transcript,
-            )
-            .is_ok());
+            assert!(
+                verify_proof(
+                    &params,
+                    pk.get_vk(),
+                    strategy,
+                    &[&[&pubinputs[..]], &[&pubinputs[..]]],
+                    &mut transcript,
+                )
+                .is_ok()
+            );
         }
 
         //
@@ -1154,28 +1160,32 @@ fn plonk_api() {
 
         let strategy = SingleVerifier::new(&params7);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        assert!(verify_proof(
-            &params7,
-            pk7.get_vk(),
-            strategy,
-            &[&[&pubinputs[..]], &[&pubinputs[..]]],
-            &mut transcript,
-        )
-        .is_ok());
+        assert!(
+            verify_proof(
+                &params7,
+                pk7.get_vk(),
+                strategy,
+                &[&[&pubinputs[..]], &[&pubinputs[..]]],
+                &mut transcript,
+            )
+            .is_ok()
+        );
 
         // The prepared route must also reject: same proof bytes against
         // the wrong public inputs.
         let wrong_pubinputs = [instance + Fp::ONE];
         let strategy = SingleVerifier::new(&params7);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        assert!(verify_proof(
-            &params7,
-            pk7.get_vk(),
-            strategy,
-            &[&[&wrong_pubinputs[..]], &[&wrong_pubinputs[..]]],
-            &mut transcript,
-        )
-        .is_err());
+        assert!(
+            verify_proof(
+                &params7,
+                pk7.get_vk(),
+                strategy,
+                &[&[&wrong_pubinputs[..]], &[&wrong_pubinputs[..]]],
+                &mut transcript,
+            )
+            .is_err()
+        );
 
         // One proof per batch keeps the folded extras below n, so the
         // batch verifier's single final check routes prepared too (a batch

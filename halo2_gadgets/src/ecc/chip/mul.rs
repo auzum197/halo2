@@ -1,4 +1,4 @@
-use super::{add, CircuitVersion, EccPoint, NonIdentityEccPoint, ScalarVar, T_Q};
+use super::{CircuitVersion, EccPoint, NonIdentityEccPoint, ScalarVar, T_Q, add};
 use crate::utilities::{
     lookup_range_check::{PallasLookupRangeCheck, PallasLookupRangeCheckConfig},
     {bool_check, ternary},
@@ -461,8 +461,8 @@ fn decompose_for_scalar_mul(scalar: Value<&pallas::Base>) -> Vec<Value<bool>> {
 #[cfg(test)]
 pub mod tests {
     use group::{
-        ff::{Field, PrimeField},
         Curve,
+        ff::{Field, PrimeField},
     };
     use halo2_proofs::{
         circuit::{Chip, Layouter, Value},
@@ -473,11 +473,11 @@ pub mod tests {
 
     use crate::{
         ecc::{
+            EccInstructions, NonIdentityPoint, Point, ScalarVar,
             chip::{EccChip, EccPoint},
             tests::TestFixedBases,
-            EccInstructions, NonIdentityPoint, Point, ScalarVar,
         },
-        utilities::{lookup_range_check::PallasLookupRangeCheck, UtilitiesInstructions},
+        utilities::{UtilitiesInstructions, lookup_range_check::PallasLookupRangeCheck},
     };
 
     pub(crate) fn test_mul<Lookup: PallasLookupRangeCheck>(
@@ -597,13 +597,13 @@ pub mod tests {
     mod base_anchoring {
         use crate::{
             ecc::{
+                CircuitVersion, NonIdentityPoint, ScalarVar,
                 chip::{EccChip, EccConfig},
                 tests::TestFixedBases,
-                CircuitVersion, NonIdentityPoint, ScalarVar,
             },
             utilities::{
-                lookup_range_check::{LookupRangeCheck, PallasLookupRangeCheckConfig},
                 UtilitiesInstructions,
+                lookup_range_check::{LookupRangeCheck, PallasLookupRangeCheckConfig},
             },
         };
         use group::{Curve, Group};

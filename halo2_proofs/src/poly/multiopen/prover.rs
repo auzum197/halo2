@@ -1,13 +1,13 @@
 use super::super::{
-    commitment::{self, Blind, Params},
     Coeff, Polynomial,
+    commitment::{self, Blind, Params},
 };
 use super::{
-    construct_intermediate_sets, ChallengeX1, ChallengeX2, ChallengeX3, ChallengeX4, ProverQuery,
-    Query,
+    ChallengeX1, ChallengeX2, ChallengeX3, ChallengeX4, ProverQuery, Query,
+    construct_intermediate_sets,
 };
 
-use crate::arithmetic::{eval_polynomial, kate_division, CurveAffine};
+use crate::arithmetic::{CurveAffine, eval_polynomial, kate_division};
 use crate::multicore;
 use crate::transcript::{EncodedChallenge, TranscriptWrite};
 
@@ -380,7 +380,7 @@ impl<'a, C: CurveAffine> Query<C::Scalar> for ProverQuery<'a, C> {
 
 #[cfg(test)]
 mod tests {
-    use super::{collapse_polynomials, Coeff, Polynomial, MIN_PARALLEL_FOLDS_PER_THREAD};
+    use super::{Coeff, MIN_PARALLEL_FOLDS_PER_THREAD, Polynomial, collapse_polynomials};
     use ff::Field;
     use pasta_curves::{Fp, Fq};
     use std::fmt::Debug;

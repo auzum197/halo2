@@ -85,10 +85,9 @@ impl fmt::Display for Error {
                 column
             ),
             Error::TableError(error) => write!(f, "{}", error),
-            Error::IllegalHashFromPrivatePoint =>  write!(
-                f,
-                "Hashing from private point is disabled"
-            )
+            Error::IllegalHashFromPrivatePoint => {
+                write!(f, "Hashing from private point is disabled")
+            }
         }
     }
 }

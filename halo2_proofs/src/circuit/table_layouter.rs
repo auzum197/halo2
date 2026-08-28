@@ -102,7 +102,7 @@ impl<'r, 'a, F: Field, CS: Assignment<F> + 'a> TableLayouter<F>
                     column,
                     format!("{:?}", entry.0.unwrap()),
                     format!("{:?}", value),
-                )))
+                )));
             }
             _ => (),
         }

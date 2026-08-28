@@ -1,12 +1,12 @@
 #[macro_use]
 extern crate criterion;
 
-use crate::arithmetic::{best_fft, CurveExt};
+use crate::arithmetic::{CurveExt, best_fft};
 use crate::pasta::{Eq, EqAffine, Fp};
 use crate::poly::commitment::Params;
 use group::{
-    ff::{Field, PrimeField},
     Curve, CurveAffine,
+    ff::{Field, PrimeField},
 };
 use halo2_proofs::*;
 

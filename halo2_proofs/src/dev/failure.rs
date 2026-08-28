@@ -4,9 +4,8 @@ use std::fmt;
 use group::ff::Field;
 
 use super::{
-    metadata,
+    MockProver, Region, metadata,
     util::{self, AnyQuery},
-    MockProver, Region,
 };
 use crate::{
     dev::Value,

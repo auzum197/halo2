@@ -943,7 +943,7 @@ mod tests {
                         .map(|chunk| F::from(lebs2ip::<K>(chunk.try_into().unwrap())))
                         .collect::<Vec<_>>()
                 };
-                
+
                 {
                     let inv_two_pow_k = inverse_power_of_two::<F>(K);
                     chunks.iter().fold(vec![element], |mut zs, a_i| {
