@@ -45,5 +45,5 @@ than continuing the upstream `0.5.0` numbering.
 - Sped up witness generation in the ECC, Poseidon, and Sinsemilla gadgets and
   the range-check and decomposition utilities, reducing proof creation time for
   circuits built from them.
-- Raised the minimum supported Rust version to 1.88 and migrated the crate to
+- Raised the minimum supported Rust version to 1.91 and migrated the crate to
   the 2024 edition.

@@ -82,7 +82,7 @@ than continuing the upstream `0.3.5` numbering.
   `keygen_pk`).
 - Enabled an assembly-accelerated field-arithmetic backend on Apple aarch64
   targets, speeding up proving and verification there without any configuration.
-- Raised the minimum supported Rust version to 1.88 and migrated the crate to
+- Raised the minimum supported Rust version to 1.91 and migrated the crate to
   the 2024 edition.
 
 ### Fixed
