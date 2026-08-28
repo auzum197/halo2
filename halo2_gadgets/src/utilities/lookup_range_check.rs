@@ -943,7 +943,8 @@ mod tests {
                         .map(|chunk| F::from(lebs2ip::<K>(chunk.try_into().unwrap())))
                         .collect::<Vec<_>>()
                 };
-                let expected_zs = {
+                
+                {
                     let inv_two_pow_k = inverse_power_of_two::<F>(K);
                     chunks.iter().fold(vec![element], |mut zs, a_i| {
                         // z_{i + 1} = (z_i - a_i) / 2^{K}
@@ -951,8 +952,7 @@ mod tests {
                         zs.push(z);
                         zs
                     })
-                };
-                expected_zs
+                }
             }
 
             for (element, expected_final_z, strict) in elements_and_expected_final_zs.iter() {

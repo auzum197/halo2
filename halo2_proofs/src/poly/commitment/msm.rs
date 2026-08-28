@@ -54,8 +54,8 @@ fn canonicalize_other<C: CurveAffine>(mut terms: Vec<ArbitraryTerm<C>>) -> Vec<A
 
     let mut canonical = Vec::with_capacity(terms.len());
     for (x, (scalar, y)) in terms {
-        if let Some((our_x, (our_scalar, our_y))) = canonical.last_mut() {
-            if *our_x == x {
+        if let Some((our_x, (our_scalar, our_y))) = canonical.last_mut()
+            && *our_x == x {
                 if *our_y == y {
                     *our_scalar += scalar;
                 } else {
@@ -64,7 +64,6 @@ fn canonicalize_other<C: CurveAffine>(mut terms: Vec<ArbitraryTerm<C>>) -> Vec<A
                 }
                 continue;
             }
-        }
         canonical.push((x, (scalar, y)));
     }
 
@@ -315,8 +314,8 @@ impl<'a, C: CurveAffine> MSM<'a, C> {
         // docs), so wide pools fall through to the plain multiexp and
         // arming is never a pessimization.
         #[cfg(feature = "orbits")]
-        if crate::multicore::current_num_threads() <= PREPARED_MSM_MAX_THREADS {
-            if let Some(prepared) = self.params.zero_check() {
+        if crate::multicore::current_num_threads() <= PREPARED_MSM_MAX_THREADS
+            && let Some(prepared) = self.params.zero_check() {
                 let n = self.params.n as usize;
                 if prepared.terms() == n + 2 {
                     if !self.batched_other.is_empty() {
@@ -356,7 +355,6 @@ impl<'a, C: CurveAffine> MSM<'a, C> {
                     }
                 }
             }
-        }
 
         bool::from(self.multiexp().is_identity())
     }
