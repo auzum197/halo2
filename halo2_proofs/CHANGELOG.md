@@ -22,8 +22,6 @@ than continuing the upstream `0.3.5` numbering.
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-08-28
-
 ### Added
 
 - Added `FloorPlanner::synthesize_batch`, a default-implemented trait method
