@@ -573,9 +573,9 @@ where
         // within this region.
 
         for (row, word) in words.iter().enumerate() {
-            let gen = word.map(|word| SINSEMILLA_S[word as usize]);
-            let x_p = gen.map(|gen| gen.0);
-            let y_p = gen.map(|gen| gen.1);
+            let r#gen = word.map(|word| SINSEMILLA_S[word as usize]);
+            let x_p = r#gen.map(|r#gen| r#gen.0);
+            let y_p = r#gen.map(|r#gen| r#gen.1);
 
             // Assign `x_p`
             region.assign_advice(|| "x_p", config.double_and_add.x_p, offset + row, || x_p)?;
@@ -585,8 +585,8 @@ where
                     let (next_point, witness) = point
                         .as_ref()
                         .zip(*word)
-                        .zip(gen)
-                        .map(|((point, word), gen)| {
+                        .zip(r#gen)
+                        .map(|((point, word), r#gen)| {
                             MERKLE_FIRST_WORD_WITNESSES
                                 .get(word as usize)
                                 .copied()
@@ -594,7 +594,7 @@ where
                                     // Preserve generic behavior if the Merkle
                                     // domain is used with another message.
                                     let mut point = *point;
-                                    let witness = point.double_and_add(gen);
+                                    let witness = point.double_and_add(r#gen);
                                     CachedFirstWordWitness { point, witness }
                                 })
                         })
@@ -605,8 +605,8 @@ where
                 } else {
                     point
                         .as_mut()
-                        .zip(gen)
-                        .map(|(point, gen)| point.double_and_add(gen))
+                        .zip(r#gen)
+                        .map(|(point, r#gen)| point.double_and_add(r#gen))
                 };
 
                 let lambda_1 = witness

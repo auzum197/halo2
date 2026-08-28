@@ -128,7 +128,7 @@ impl Lookup {
         2 + cmp::max(1, self.input_deg) + cmp::max(1, self.table_deg)
     }
 
-    fn queries(&self) -> impl Iterator<Item = Poly> {
+    fn queries(&self) -> impl Iterator<Item = Poly> + use<> {
         // - product commitments at x and x_inv
         // - input commitments at x and x_inv
         // - table commitments at x
@@ -163,7 +163,7 @@ impl Permutation {
         cmp::max(self.columns + 1, 2)
     }
 
-    fn queries(&self) -> impl Iterator<Item = Poly> {
+    fn queries(&self) -> impl Iterator<Item = Poly> + use<> {
         // - product commitments at x and x_inv
         // - polynomial commitments at x
         let product = "0,-1".parse().unwrap();
