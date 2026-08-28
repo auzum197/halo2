@@ -22,8 +22,6 @@ than continuing the upstream `0.5.0` numbering.
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-08-28
-
 ### Changed
 
 - Renamed the package from `halo2_gadgets` to `zakura-halo2-gadgets`; the
