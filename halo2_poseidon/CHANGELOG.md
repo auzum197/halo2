@@ -21,3 +21,17 @@ than continuing the upstream `0.1.0` numbering.
 - Imported into this repository in commit `16d18d2a43d0aecdfcf9e9d02469c16ebf20e50b`.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-08-28
+
+### Changed
+
+- Renamed the package from `halo2_poseidon` to `zakura-halo2-poseidon`; the
+  library target keeps its upstream name, so existing `use` paths compile
+  unchanged.
+- Updated `ff` and `group` from 0.13 to 0.14; the `Field` trait bounds on
+  `Spec`, `Domain`, `Hash`, and the sponge APIs now refer to the 0.14 traits.
+- Replaced the upstream `pasta_curves` dependency with the Zakura fork
+  (`zakura-pasta-curves` 1.0.0), whose types appear in this crate's API.
+- Raised the minimum supported Rust version to 1.88 and migrated the crate to
+  the 2024 edition.
