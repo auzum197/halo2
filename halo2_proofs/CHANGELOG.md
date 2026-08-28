@@ -40,6 +40,8 @@ and this project adheres to Rust's notion of
   forcing chunks of at least 32 points.
 - Lookup grand-product preparation now reuses its fraction buffer for product
   accumulation, avoiding one domain-sized allocation per lookup argument.
+- Permutation grand-product preparation now reuses its fraction buffer for
+  product accumulation, avoiding one domain-sized allocation per column set.
 - Parallel polynomial evaluation now uses eight chunks per worker for finer
   load balancing across uneven evaluator workloads.
 - Proof creation now prepares independent commitments and polynomial transforms
@@ -54,6 +56,9 @@ and this project adheres to Rust's notion of
   circuits are now prepared in parallel when multicore support is enabled,
   while retaining transcript order.
 - Added an opt-in (default-off) `orbits` feature (forwarding `pasta_curves/orbits`)
+- Permutation product polynomials for independent proof circuits are now
+  prepared in parallel when the worker pool has capacity for both outer
+  circuit tasks and their nested commitment and transform work.
   gating the prepared zero-check integration below. Built without it,
   `Params::prepare_zero_checks` is a no-op returning `false` and
   `MSM::eval` always evaluates the plain multiexp, so the machinery can
