@@ -4,10 +4,10 @@
 //! the proof was accepted. Verification callers must continue to use [`super::SingleVerifier`].
 
 use crate::arithmetic::CurveAffine;
-use crate::poly::commitment::{Guard, Params, MSM};
+use crate::poly::commitment::{Guard, MSM, Params};
 use crate::transcript::{EncodedChallenge, TranscriptRead};
 
-use super::{verify_proof, Error, VerificationStrategy, VerifyingKey};
+use super::{Error, VerificationStrategy, VerifyingKey, verify_proof};
 
 mod transcript;
 

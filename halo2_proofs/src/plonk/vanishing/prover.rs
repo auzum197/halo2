@@ -10,14 +10,13 @@ use super::Argument;
 use crate::{
     arithmetic::CurveAffine,
     plonk::{
-        evaluation::{EvaluationPoint, EvaluationQuery, PolynomialEvaluator},
         ChallengeX, ChallengeY, Error,
+        evaluation::{EvaluationPoint, EvaluationQuery, PolynomialEvaluator},
     },
     poly::{
-        self,
+        self, Coeff, EvaluationDomain, ExtendedLagrangeCoeff, Polynomial, ProvingKeyTwiddles,
         commitment::{Blind, Params},
         multiopen::ProverQuery,
-        Coeff, EvaluationDomain, ExtendedLagrangeCoeff, Polynomial, ProvingKeyTwiddles,
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };

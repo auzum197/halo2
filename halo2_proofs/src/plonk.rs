@@ -8,10 +8,10 @@
 use blake2b_simd::Params as Blake2bParams;
 use group::ff::{Field, FromUniformBytes, PrimeField};
 
-use crate::arithmetic::{best_multiexp, CurveAffine};
+use crate::arithmetic::{CurveAffine, best_multiexp};
 use crate::poly::{
-    commitment::Params, Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff,
-    PinnedEvaluationDomain, Polynomial, ProvingKeyTwiddles,
+    Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff, PinnedEvaluationDomain,
+    Polynomial, ProvingKeyTwiddles, commitment::Params,
 };
 use crate::transcript::{ChallengeScalar, EncodedChallenge, Transcript};
 

@@ -6,28 +6,27 @@ use std::iter;
 use std::ops::RangeTo;
 
 use super::{
+    ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX, ChallengeY, Error, ProvingKey,
     circuit::{
         Advice, Any, Assignment, Circuit, Column, ConstraintSystem, Fixed, FloorPlanner, Instance,
         Selector,
     },
     commit_instance,
     evaluation::{EvaluationPoint, EvaluationQuery, PolynomialEvaluator},
-    lookup, permutation, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX,
-    ChallengeY, Error, ProvingKey,
+    lookup, permutation, vanishing,
 };
 
 #[cfg(test)]
 use super::circuit::FloorPlan;
 use crate::transcript::{EncodedChallenge, TranscriptWrite};
 use crate::{
-    arithmetic::{batch_invert_multi, CurveAffine},
+    arithmetic::{CurveAffine, batch_invert_multi},
     circuit::Value,
     plonk::Assigned,
     poly::{
-        self,
+        self, Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial,
         commitment::{Blind, Params},
         multiopen::{self, ProverQuery},
-        Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial,
     },
 };
 
@@ -1111,7 +1110,7 @@ fn instance_preparation_preserves_proof_and_error_order() {
         transcript::{Blake2bWrite, Challenge255, EncodedChallenge, Transcript},
     };
     use pasta_curves::{EqAffine, Fp};
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng};
 
     const PROOF_SEED: u64 = 0x494e_5354_414e_4345;
 
@@ -1234,7 +1233,7 @@ fn v1_proving_key_reuses_floor_plan() {
         transcript::{Blake2bWrite, Challenge255},
     };
     use pasta_curves::EqAffine;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static MEASUREMENTS: AtomicUsize = AtomicUsize::new(0);

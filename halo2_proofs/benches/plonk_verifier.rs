@@ -11,8 +11,8 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     pasta::{EqAffine, Fp},
     plonk::{
-        create_proof, keygen_pk, keygen_vk, verify_proof, Advice, Circuit, Column,
-        ConstraintSystem, Error, Instance, ProvingKey, SingleVerifier,
+        Advice, Circuit, Column, ConstraintSystem, Error, Instance, ProvingKey, SingleVerifier,
+        create_proof, keygen_pk, keygen_vk, verify_proof,
     },
     poly::commitment::Params,
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},

@@ -1,24 +1,22 @@
 use group::{
-    ff::{Field, PrimeField},
     Curve,
+    ff::{Field, PrimeField},
 };
 use rand_core::Rng;
 use std::{convert::Infallible, iter};
 
-use super::super::{circuit::Any, ChallengeBeta, ChallengeGamma, ChallengeX};
-use super::{permutation_chunk_len, Argument, ProvingKey};
+use super::super::{ChallengeBeta, ChallengeGamma, ChallengeX, circuit::Any};
+use super::{Argument, ProvingKey, permutation_chunk_len};
 use crate::{
-    arithmetic::{parallelize, CurveAffine},
+    arithmetic::{CurveAffine, parallelize},
     plonk::{
-        self,
+        self, Error,
         evaluation::{EvaluationPoint, EvaluationQuery, PolynomialEvaluator},
-        Error,
     },
     poly::{
-        self,
+        self, Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation,
         commitment::{Blind, Params},
         multiopen::ProverQuery,
-        Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation,
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
@@ -593,13 +591,13 @@ mod tests {
     use crate::{
         circuit::{Layouter, SimpleFloorPlanner, Value},
         plonk::{
-            create_proof, keygen_pk, keygen_vk, Advice, Circuit, Column, ConstraintSystem, Error,
+            Advice, Circuit, Column, ConstraintSystem, Error, create_proof, keygen_pk, keygen_vk,
         },
         poly::commitment::Params,
         transcript::{Blake2bWrite, Challenge255},
     };
     use pasta_curves::{EqAffine, Fp};
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng};
 
     const EQUALITY_COLUMNS: usize = 3;
     const PROOF_CIRCUITS: usize = 4;
