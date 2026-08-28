@@ -8,6 +8,9 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+- The `fft` bench's curve-FFT and parameter-generation rows now also measure
+  `k = 12` and `k = 13` (`curve-fft/affine-eisenstein-k{12,13}`,
+  `params/new-k{12,13}`); the `k = 11` benchmark IDs are unchanged.
 - Prepared the `1.0.0-rc.4` release.
 - Late IPA L/R commitments now use balanced GLV-Strauss leaves on Pasta
   curves. With six workers, paired 66-term round MSM latency fell from about
