@@ -90,7 +90,7 @@ pub trait RegionLayouter<F: Field>: fmt::Debug {
 
     /// Returns the value of the instance column's cell at absolute location `row`.
     fn instance_value(&mut self, instance: Column<Instance>, row: usize)
-        -> Result<Value<F>, Error>;
+    -> Result<Value<F>, Error>;
 
     /// Assigns a fixed value
     fn assign_fixed<'v>(

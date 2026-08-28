@@ -470,7 +470,7 @@ mod tests {
     use group::ff::PrimeField;
     use pasta_curves::pallas;
 
-    use super::{permute, ConstantLength, Hash, P128Pow5T3 as OrchardNullifier, Spec};
+    use super::{ConstantLength, Hash, P128Pow5T3 as OrchardNullifier, Spec, permute};
 
     #[test]
     fn orchard_spec_equivalence() {

@@ -91,10 +91,10 @@
 use super::{Coeff, LagrangeCoeff, Polynomial};
 #[cfg(feature = "orbits")]
 use crate::arithmetic::PreparedZeroCheck;
-use crate::arithmetic::{best_fft, best_multiexp, parallelize, CurveAffine, CurveExt};
+use crate::arithmetic::{CurveAffine, CurveExt, best_fft, best_multiexp, parallelize};
 use crate::helpers::CurveRead;
 #[cfg(feature = "batch")]
-use crate::{InstanceWindowTable, INSTANCE_WINDOW_ENTRIES_PER_BASE, MAX_CACHED_INSTANCE_ROWS};
+use crate::{INSTANCE_WINDOW_ENTRIES_PER_BASE, InstanceWindowTable, MAX_CACHED_INSTANCE_ROWS};
 
 use ff::{Field, PrimeField};
 use group::{Curve, Group};
@@ -111,7 +111,7 @@ mod verifier;
 
 pub use msm::MSM;
 pub use prover::create_proof;
-pub use verifier::{verify_proof, Accumulator, Guard};
+pub use verifier::{Accumulator, Guard, verify_proof};
 
 use std::io;
 
@@ -342,16 +342,17 @@ impl<C: CurveAffine> Params<C> {
         // multiexp out-scales the prepared evaluation.
         #[cfg(feature = "orbits")]
         if crate::multicore::current_num_threads() <= msm::PREPARED_MSM_MAX_THREADS
-            && let Some(prepared) = self.zero_check() {
-                let n = self.n as usize;
-                if prepared.terms() == n + 2 && poly.len() == n {
-                    let mut fixed = Vec::with_capacity(n + 2);
-                    fixed.extend(poly.iter());
-                    fixed.push(r.0);
-                    fixed.push(C::Scalar::ZERO);
-                    return prepared.multiexp_with_terms_vartime(&fixed, &[]);
-                }
+            && let Some(prepared) = self.zero_check()
+        {
+            let n = self.n as usize;
+            if prepared.terms() == n + 2 && poly.len() == n {
+                let mut fixed = Vec::with_capacity(n + 2);
+                fixed.extend(poly.iter());
+                fixed.push(r.0);
+                fixed.push(C::Scalar::ZERO);
+                return prepared.multiexp_with_terms_vartime(&fixed, &[]);
             }
+        }
 
         let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
         let mut tmp_bases = Vec::with_capacity(poly.len() + 1);
@@ -378,16 +379,17 @@ impl<C: CurveAffine> Params<C> {
         // `Params::prepare_commitments`; same thread gate.
         #[cfg(feature = "orbits")]
         if crate::multicore::current_num_threads() <= msm::PREPARED_MSM_MAX_THREADS
-            && let Some(prepared) = self.lagrange_table() {
-                let n = self.n as usize;
-                if prepared.terms() == n + 2 && poly.len() == n {
-                    let mut fixed = Vec::with_capacity(n + 2);
-                    fixed.extend(poly.iter());
-                    fixed.push(r.0);
-                    fixed.push(C::Scalar::ZERO);
-                    return prepared.multiexp_with_terms_vartime(&fixed, &[]);
-                }
+            && let Some(prepared) = self.lagrange_table()
+        {
+            let n = self.n as usize;
+            if prepared.terms() == n + 2 && poly.len() == n {
+                let mut fixed = Vec::with_capacity(n + 2);
+                fixed.extend(poly.iter());
+                fixed.push(r.0);
+                fixed.push(C::Scalar::ZERO);
+                return prepared.multiexp_with_terms_vartime(&fixed, &[]);
             }
+        }
 
         let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
         let mut tmp_bases = Vec::with_capacity(poly.len() + 1);
@@ -709,10 +711,12 @@ fn instance_window_cache_is_shared_by_clones_only() {
         tables[0].len(),
         BASE_COUNT * INSTANCE_WINDOW_ENTRIES_PER_BASE,
     );
-    assert!(tables
-        .iter()
-        .skip(1)
-        .all(|table| Arc::ptr_eq(&tables[0], table)));
+    assert!(
+        tables
+            .iter()
+            .skip(1)
+            .all(|table| Arc::ptr_eq(&tables[0], table))
+    );
 
     let cloned = params.as_ref().clone();
     let cloned_table = cloned.instance_window_table(BASE_COUNT);
@@ -908,8 +912,8 @@ fn test_opening_proof() {
     use rand::rng;
 
     use super::{
-        commitment::{Blind, Params},
         EvaluationDomain,
+        commitment::{Blind, Params},
     };
     use crate::arithmetic::eval_polynomial;
     use crate::pasta::{EpAffine, Fq};

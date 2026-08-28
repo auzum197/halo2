@@ -10,20 +10,20 @@ use pasta_curves::pallas;
 use super::MerkleInstructions;
 
 use crate::{
-    sinsemilla::{primitives as sinsemilla, MessagePiece},
+    sinsemilla::{MessagePiece, primitives as sinsemilla},
     utilities::{
-        lookup_range_check::{PallasLookupRangeCheck, PallasLookupRangeCheckConfig},
         RangeConstrained,
+        lookup_range_check::{PallasLookupRangeCheck, PallasLookupRangeCheckConfig},
     },
     {
         ecc::FixedPoints,
         sinsemilla::{
-            chip::{SinsemillaChip, SinsemillaConfig},
             CommitDomains, HashDomains, SinsemillaInstructions,
+            chip::{SinsemillaChip, SinsemillaConfig},
         },
         utilities::{
-            cond_swap::{CondSwapChip, CondSwapConfig, CondSwapInstructions},
             UtilitiesInstructions,
+            cond_swap::{CondSwapChip, CondSwapConfig, CondSwapInstructions},
         },
     },
 };

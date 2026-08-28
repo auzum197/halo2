@@ -14,13 +14,13 @@ use group::ff::{Field, PrimeField};
 use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner, Value};
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::pasta::{EqAffine, Fp};
-use halo2_proofs::plonk::fingerprint::{capture_proof_fingerprint, ChallengeRecorder};
+use halo2_proofs::plonk::fingerprint::{ChallengeRecorder, capture_proof_fingerprint};
 use halo2_proofs::plonk::{
-    create_proof, keygen_pk, keygen_vk, verify_proof, Advice, Circuit, Column, ConstraintSystem,
-    Error, Instance, Selector, SingleVerifier, TableColumn,
+    Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector, SingleVerifier,
+    TableColumn, create_proof, keygen_pk, keygen_vk, verify_proof,
 };
-use halo2_proofs::poly::commitment::Params;
 use halo2_proofs::poly::Rotation;
+use halo2_proofs::poly::commitment::Params;
 use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255};
 use rand::rng;
 
@@ -175,14 +175,16 @@ fn exports_accepting_fixture() {
     // The proof verifies, so the captured fingerprint is the group identity.
     let strategy = SingleVerifier::new(&params);
     let mut verify_transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-    assert!(verify_proof(
-        &params,
-        pk.get_vk(),
-        strategy,
-        &[&[&pubinputs[..]]],
-        &mut verify_transcript,
-    )
-    .is_ok());
+    assert!(
+        verify_proof(
+            &params,
+            pk.get_vk(),
+            strategy,
+            &[&[&pubinputs[..]]],
+            &mut verify_transcript,
+        )
+        .is_ok()
+    );
 
     let mut transcript = ChallengeRecorder::<_, _, Challenge255<_>>::init(&proof[..]);
     let msm =

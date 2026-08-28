@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn lebs2ip_round_trip() {
-        use rand::{rng, Rng};
+        use rand::{Rng, rng};
 
         let mut rng = rng();
         {

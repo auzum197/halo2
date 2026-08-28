@@ -6,19 +6,19 @@ use ff::{Field, FromUniformBytes};
 use group::Curve;
 
 use super::{
+    Assigned, Error, LagrangeCoeff, Polynomial, ProvingKey, VerifyingKey,
     circuit::{
         Advice, Any, Assignment, Circuit, Column, ConstraintSystem, Fixed, FloorPlanner, Instance,
         Selector,
     },
-    permutation, Assigned, Error, LagrangeCoeff, Polynomial, ProvingKey, VerifyingKey,
+    permutation,
 };
 use crate::{
-    arithmetic::{best_multiexp, CurveAffine},
+    arithmetic::{CurveAffine, best_multiexp},
     circuit::Value,
     poly::{
-        batch_invert_assigned,
+        EvaluationDomain, batch_invert_assigned,
         commitment::{Blind, Params},
-        EvaluationDomain,
     },
 };
 
@@ -390,8 +390,8 @@ mod tests {
     use crate::{
         pasta::{EqAffine, Fp},
         poly::{
-            commitment::{Blind, Params},
             EvaluationDomain,
+            commitment::{Blind, Params},
         },
     };
 

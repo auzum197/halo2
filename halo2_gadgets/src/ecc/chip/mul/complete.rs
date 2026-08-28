@@ -1,4 +1,4 @@
-use super::super::{add, EccPoint};
+use super::super::{EccPoint, add};
 use super::{COMPLETE_RANGE, X, Y, Z};
 use crate::utilities::{bool_check, ternary};
 
@@ -157,12 +157,11 @@ impl Config {
                 )?;
 
                 // If the bit is set, use `y`; if the bit is not set, use `-y`
-                let y_p =
-                    base_y
-                        .value()
-                        .cloned()
-                        .zip(k.as_ref())
-                        .map(|(base_y, k)| if !k { -base_y } else { base_y });
+                let y_p = base_y
+                    .value()
+                    .cloned()
+                    .zip(k.as_ref())
+                    .map(|(base_y, k)| if !k { -base_y } else { base_y });
 
                 // Assign the conditionally-negated y coordinate into the cell it will be
                 // used from by both the complete addition gate, and the decomposition and

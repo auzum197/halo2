@@ -452,8 +452,8 @@ trait Table16Assignment {
 #[cfg(test)]
 #[cfg(feature = "test-dev-graph")]
 mod tests {
-    use super::super::{Sha256, BLOCK_SIZE};
-    use super::{message_schedule::msg_schedule_test_input, Table16Chip, Table16Config};
+    use super::super::{BLOCK_SIZE, Sha256};
+    use super::{Table16Chip, Table16Config, message_schedule::msg_schedule_test_input};
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         pasta::pallas,

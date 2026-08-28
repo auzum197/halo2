@@ -49,8 +49,8 @@ use crate::pasta::{EqAffine, Fp, Fq};
 use crate::poly::commitment::{Blind, MSM};
 use crate::transcript::Challenge255;
 
-use super::super::circuit::{Any, Expression};
 use super::super::VerifyingKey;
+use super::super::circuit::{Any, Expression};
 
 /// A field element as a Lean constructor call with four little-endian `u64` limbs.
 fn field<F: PrimeField>(constructor: &str, x: F) -> String {

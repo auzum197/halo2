@@ -2,8 +2,8 @@
 
 use arrayvec::ArrayVec;
 use group::{
-    ff::{Field, PrimeField},
     Curve,
+    ff::{Field, PrimeField},
 };
 use halo2_proofs::arithmetic::lagrange_interpolate;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
@@ -231,11 +231,11 @@ pub fn test_lagrange_coeffs<C: CurveAffine>(base: C, num_windows: usize) {
 #[cfg(test)]
 mod tests {
     use ff::FromUniformBytes;
-    use group::{ff::Field, Curve, Group};
+    use group::{Curve, Group, ff::Field};
     use pasta_curves::{arithmetic::CurveAffine, pallas};
     use proptest::prelude::*;
 
-    use super::{compute_window_table, find_zs_and_us, test_lagrange_coeffs, H, NUM_WINDOWS};
+    use super::{H, NUM_WINDOWS, compute_window_table, find_zs_and_us, test_lagrange_coeffs};
 
     prop_compose! {
         /// Generate an arbitrary Pallas point.

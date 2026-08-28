@@ -637,11 +637,11 @@ pub(crate) mod tests {
     use std::sync::LazyLock;
 
     use super::{
-        chip::{
-            BaseFieldElem, EccChip, EccConfig, FixedPoint, FullScalar, ShortScalar, H, NUM_WINDOWS,
-            NUM_WINDOWS_SHORT,
-        },
         CircuitVersion, FixedPoints,
+        chip::{
+            BaseFieldElem, EccChip, EccConfig, FixedPoint, FullScalar, H, NUM_WINDOWS,
+            NUM_WINDOWS_SHORT, ShortScalar,
+        },
     };
     use crate::{
         test_circuits::test_utils::{test_against_stored_circuit, test_zs_and_us},

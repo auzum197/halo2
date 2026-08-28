@@ -1,7 +1,7 @@
 use super::{
     super::DIGEST_SIZE,
+    AssignedBits, BlockWord, ROUNDS, STATE, SpreadInputs, SpreadVar, Table16Assignment,
     util::{i2lebsp, lebs2ip},
-    AssignedBits, BlockWord, SpreadInputs, SpreadVar, Table16Assignment, ROUNDS, STATE,
 };
 use halo2_proofs::{
     circuit::{Layouter, Value},
@@ -938,7 +938,7 @@ impl CompressionConfig {
 #[cfg(test)]
 mod tests {
     use super::super::{
-        super::BLOCK_SIZE, msg_schedule_test_input, BlockWord, Table16Chip, Table16Config, IV,
+        super::BLOCK_SIZE, BlockWord, IV, Table16Chip, Table16Config, msg_schedule_test_input,
     };
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},

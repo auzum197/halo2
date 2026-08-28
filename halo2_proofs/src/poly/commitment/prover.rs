@@ -4,7 +4,7 @@ use rand_core::Rng;
 use super::super::{Coeff, Polynomial};
 use super::{Blind, Params};
 use crate::arithmetic::{
-    best_multiexp, compute_inner_product, eval_polynomial, CurveAffine, CurveExt,
+    CurveAffine, CurveExt, best_multiexp, compute_inner_product, eval_polynomial,
 };
 use crate::transcript::{EncodedChallenge, TranscriptWrite};
 
@@ -263,11 +263,11 @@ fn parallel_generator_collapse<C: CurveAffine>(g: &mut [C], challenge: C::Scalar
 #[cfg(test)]
 mod tests {
     use super::{
-        ipa_masking_commitment, ipa_round_multiexp, parallel_generator_collapse,
-        sample_ipa_masking_polynomial, Params,
+        Params, ipa_masking_commitment, ipa_round_multiexp, parallel_generator_collapse,
+        sample_ipa_masking_polynomial,
     };
-    use crate::arithmetic::{best_multiexp, eval_polynomial, CurveAffine};
-    use crate::poly::{commitment::Blind, EvaluationDomain};
+    use crate::arithmetic::{CurveAffine, best_multiexp, eval_polynomial};
+    use crate::poly::{EvaluationDomain, commitment::Blind};
     use ff::Field;
     use group::{Curve, Group};
     use pasta_curves::{pallas, vesta};

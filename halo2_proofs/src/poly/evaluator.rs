@@ -1,7 +1,7 @@
 use std::{
     any::{Any, TypeId},
     borrow::Cow,
-    collections::{hash_map::DefaultHasher, HashMap},
+    collections::{HashMap, hash_map::DefaultHasher},
     fmt,
     hash::{Hash, Hasher},
     marker::PhantomData,
@@ -763,12 +763,13 @@ fn reduce_deferred<T: DeferredField + 'static, F: Field>(
 impl<E: Copy, F: Field, B: Basis> EvaluationPlan<E, F, B> {
     fn compile(ast: &Ast<E, F, B>) -> Self {
         if let Ast::Add(_, _) = ast
-            && let Some(polynomial) = expanded_polynomial(ast) {
-                return Self::Horner {
-                    base: Box::new(Self::compile(polynomial.base)),
-                    coefficients: polynomial.coefficients,
-                };
-            }
+            && let Some(polynomial) = expanded_polynomial(ast)
+        {
+            return Self::Horner {
+                base: Box::new(Self::compile(polynomial.base)),
+                coefficients: polynomial.coefficients,
+            };
+        }
 
         match ast {
             Ast::Poly(leaf) => Self::Poly(*leaf),
@@ -1264,11 +1265,12 @@ fn apply_cache_actions<E, F: Field, B: Basis>(
     let action = actions[*occurrence];
     *occurrence += 1;
     if let Some(action) = action
-        && !action.store {
-            *plan = EvaluationPlan::CacheLoad { slot: action.slot };
-            *occurrence = action.end;
-            return;
-        }
+        && !action.store
+    {
+        *plan = EvaluationPlan::CacheLoad { slot: action.slot };
+        *occurrence = action.end;
+        return;
+    }
 
     match plan {
         EvaluationPlan::Add(lhs, rhs) | EvaluationPlan::Mul(lhs, rhs) => {
@@ -1725,22 +1727,23 @@ impl<'poly, E, F: Field, B: Basis> Evaluator<'poly, E, F, B> {
                 EvaluationPlan::Add(a, b) => {
                     recurse_into(a, ctx, output, cache, scratch);
                     if let EvaluationPlan::Scale(negated_rhs, scalar) = b.as_ref()
-                        && *scalar == ctx.minus_one {
-                            if let EvaluationPlan::Poly(leaf) = negated_rhs.as_ref() {
-                                let chunk = leaf_chunk(leaf, ctx, output.len());
-                                for (lhs, rhs) in output.iter_mut().zip(chunk.iter()) {
-                                    *lhs -= *rhs;
-                                }
-                                return;
-                            }
-
-                            let (rhs_values, rhs_scratch) = scratch.split_at_mut(output.len());
-                            recurse_into(negated_rhs, ctx, rhs_values, cache, rhs_scratch);
-                            for (lhs, rhs) in output.iter_mut().zip(rhs_values.iter()) {
+                        && *scalar == ctx.minus_one
+                    {
+                        if let EvaluationPlan::Poly(leaf) = negated_rhs.as_ref() {
+                            let chunk = leaf_chunk(leaf, ctx, output.len());
+                            for (lhs, rhs) in output.iter_mut().zip(chunk.iter()) {
                                 *lhs -= *rhs;
                             }
                             return;
                         }
+
+                        let (rhs_values, rhs_scratch) = scratch.split_at_mut(output.len());
+                        recurse_into(negated_rhs, ctx, rhs_values, cache, rhs_scratch);
+                        for (lhs, rhs) in output.iter_mut().zip(rhs_values.iter()) {
+                            *lhs -= *rhs;
+                        }
+                        return;
+                    }
 
                     if let EvaluationPlan::Poly(leaf) = b.as_ref() {
                         let chunk = leaf_chunk(leaf, ctx, output.len());
@@ -1760,13 +1763,15 @@ impl<'poly, E, F: Field, B: Basis> Evaluator<'poly, E, F, B> {
                     // Preserve the multiplication shape while avoiding a
                     // constant vector for scalars with cheap field operations.
                     if let EvaluationPlan::ConstantTerm(scalar) = a.as_ref()
-                        && recurse_small_scale_into(b, *scalar, ctx, output, cache, scratch) {
-                            return;
-                        }
+                        && recurse_small_scale_into(b, *scalar, ctx, output, cache, scratch)
+                    {
+                        return;
+                    }
                     if let EvaluationPlan::ConstantTerm(scalar) = b.as_ref()
-                        && recurse_small_scale_into(a, *scalar, ctx, output, cache, scratch) {
-                            return;
-                        }
+                        && recurse_small_scale_into(a, *scalar, ctx, output, cache, scratch)
+                    {
+                        return;
+                    }
 
                     if let (EvaluationPlan::Poly(lhs), EvaluationPlan::Poly(rhs)) =
                         (a.as_ref(), b.as_ref())
@@ -2417,9 +2422,9 @@ mod tests {
     use pasta_curves::{pallas, vesta};
 
     use super::{
-        compressed_selector, get_chunk_params, new_evaluator, reuse_cache_slots,
-        selector_family_matches, Ast, AstLeaf, BasisOps, CacheAction, DistributionWork,
-        EvaluationPlan, Evaluator, FactorBodyPlan, FactorSide,
+        Ast, AstLeaf, BasisOps, CacheAction, DistributionWork, EvaluationPlan, Evaluator,
+        FactorBodyPlan, FactorSide, compressed_selector, get_chunk_params, new_evaluator,
+        reuse_cache_slots, selector_family_matches,
     };
     use crate::poly::{Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff, Rotation};
 
@@ -2540,10 +2545,12 @@ mod tests {
                     assert!(matches!(&ast, Ast::Mul(_)));
 
                     let result = evaluator.evaluate(&ast, &domain);
-                    assert!(result
-                        .iter()
-                        .zip(expected.iter())
-                        .all(|(result, value)| *result == *value * scalar));
+                    assert!(
+                        result
+                            .iter()
+                            .zip(expected.iter())
+                            .all(|(result, value)| *result == *value * scalar)
+                    );
                 }
             }
         }
@@ -2583,10 +2590,12 @@ mod tests {
 
         let mut lagrange_evaluator = new_evaluator::<_, _, LagrangeCoeff>(|| {});
         lagrange_evaluator.register_poly(domain.empty_lagrange());
-        assert!(lagrange_evaluator
-            .evaluate(&Ast::ConstantTerm(scalar), &domain)
-            .iter()
-            .all(|value| *value == scalar));
+        assert!(
+            lagrange_evaluator
+                .evaluate(&Ast::ConstantTerm(scalar), &domain)
+                .iter()
+                .all(|value| *value == scalar)
+        );
         let mut value = scalar;
         let expected = (0..1 << 4)
             .map(|_| {
@@ -2600,10 +2609,12 @@ mod tests {
 
         let mut extended_evaluator = new_evaluator::<_, _, ExtendedLagrangeCoeff>(|| {});
         extended_evaluator.register_poly(domain.empty_extended());
-        assert!(extended_evaluator
-            .evaluate(&Ast::ConstantTerm(scalar), &domain)
-            .iter()
-            .all(|value| *value == scalar));
+        assert!(
+            extended_evaluator
+                .evaluate(&Ast::ConstantTerm(scalar), &domain)
+                .iter()
+                .all(|value| *value == scalar)
+        );
         let mut value = scalar * pallas::Base::ZETA;
         let expected = (0..domain.extended_len())
             .map(|_| {
@@ -2920,12 +2931,14 @@ mod tests {
         let nonzero_prefix =
             expanded_polynomial_expression(direct_base.clone(), &coefficients, F::ONE);
         assert!(super::expanded_polynomial(&nonzero_prefix).is_none());
-        assert!(super::expanded_polynomial(&expanded_polynomial_expression(
-            direct_base.clone(),
-            &coefficients[..3],
-            F::ZERO,
-        ))
-        .is_none());
+        assert!(
+            super::expanded_polynomial(&expanded_polynomial_expression(
+                direct_base.clone(),
+                &coefficients[..3],
+                F::ZERO,
+            ))
+            .is_none()
+        );
 
         let mut powers = vec![];
         let mut power = Ast::ConstantTerm(F::ONE);
@@ -2991,10 +3004,12 @@ mod tests {
 
         let expected = evaluator.evaluate(&repeated, &domain);
         let actual = evaluator.evaluate(&nested_square, &domain);
-        assert!(actual
-            .iter()
-            .zip(expected.iter())
-            .all(|(actual, expected)| *actual == expected.square().square()));
+        assert!(
+            actual
+                .iter()
+                .zip(expected.iter())
+                .all(|(actual, expected)| *actual == expected.square().square())
+        );
 
         let lhs = Ast::from(leaf.with_rotation(Rotation::prev()));
         let rhs = Ast::from(leaf.with_rotation(Rotation::next()));
@@ -3007,10 +3022,12 @@ mod tests {
         let expected_lhs = evaluator.evaluate(&lhs, &domain);
         let expected_rhs = evaluator.evaluate(&rhs, &domain);
         let actual = evaluator.evaluate(&product, &domain);
-        assert!(actual
-            .iter()
-            .zip(expected_lhs.iter().zip(expected_rhs.iter()))
-            .all(|(actual, (lhs, rhs))| *actual == *lhs * rhs));
+        assert!(
+            actual
+                .iter()
+                .zip(expected_lhs.iter().zip(expected_rhs.iter()))
+                .all(|(actual, (lhs, rhs))| *actual == *lhs * rhs)
+        );
     }
 
     #[test]
@@ -3054,10 +3071,12 @@ mod tests {
         }
 
         let actual = evaluator.evaluate(&ast, &domain);
-        assert!(actual
-            .iter()
-            .zip(values.iter())
-            .all(|(actual, value)| *actual == value.square().double()));
+        assert!(
+            actual
+                .iter()
+                .zip(values.iter())
+                .all(|(actual, value)| *actual == value.square().double())
+        );
     }
 
     #[test]
@@ -3280,10 +3299,13 @@ mod tests {
             _ => panic!("multiple terms compile to distributed work"),
         };
         match work.as_slice() {
-            [DistributionWork::WeightedSharedFactor { terms, .. }, DistributionWork::Term {
-                power: middle_power,
-                ..
-            }] => {
+            [
+                DistributionWork::WeightedSharedFactor { terms, .. },
+                DistributionWork::Term {
+                    power: middle_power,
+                    ..
+                },
+            ] => {
                 assert_eq!(terms.len(), 5);
                 assert_eq!(terms[0].power, base.pow_vartime([5]));
                 assert_eq!(terms[1].power, base.pow_vartime([4]));
@@ -3618,9 +3640,11 @@ mod tests {
             EvaluationPlan::DistributePowers { work, .. } => work,
             _ => panic!("the first shared-factor body is distributed work"),
         };
-        assert!(nested_work
-            .iter()
-            .any(|work| matches!(work, DistributionWork::SelectorFamily { .. })));
+        assert!(
+            nested_work
+                .iter()
+                .any(|work| matches!(work, DistributionWork::SelectorFamily { .. }))
+        );
         // Five selector runs need eight slots. The outer shared factor uses
         // the distribution fold's buffers without adding scratch slots.
         assert_eq!(nested_plan.required_scratch_slots(), COMBINATION_LEN + 3);
@@ -3647,10 +3671,12 @@ mod tests {
             .collect::<Vec<_>>();
         let right_hand_families = selector_family_matches(&right_hand, -F::ONE);
         assert_eq!(right_hand_families.len(), 1);
-        assert!(right_hand_families[0]
-            .runs
-            .iter()
-            .all(|run| matches!(run.side, FactorSide::Right)));
+        assert!(
+            right_hand_families[0]
+                .runs
+                .iter()
+                .all(|run| matches!(run.side, FactorSide::Right))
+        );
 
         // Reverse the roots and put the unrelated term before the family to
         // exercise non-root run order and leading unclaimed terms.

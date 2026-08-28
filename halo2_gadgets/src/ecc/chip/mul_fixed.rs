@@ -1,6 +1,6 @@
 use super::{
-    add, add_incomplete, EccBaseFieldElemFixed, EccScalarFixed, EccScalarFixedShort, FixedPoint,
-    NonIdentityEccPoint, FIXED_BASE_WINDOW_SIZE, H,
+    EccBaseFieldElemFixed, EccScalarFixed, EccScalarFixedShort, FIXED_BASE_WINDOW_SIZE, FixedPoint,
+    H, NonIdentityEccPoint, add, add_incomplete,
 };
 use crate::utilities::decompose_running_sum::RunningSumConfig;
 
