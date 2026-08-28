@@ -2253,7 +2253,7 @@ impl<'a, F: Copy> RotatedChunk<'a, F> {
         }
     }
 
-    fn iter(&self) -> impl Iterator<Item = &'a F> {
+    fn iter(&self) -> impl Iterator<Item = &'a F> + use<'a, F> {
         self.first.iter().chain(self.second)
     }
 
