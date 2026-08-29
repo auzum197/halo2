@@ -473,7 +473,7 @@ pub(crate) const BATCH_INVERT_TWO_LANE_MIN: usize = 32;
 /// stays zero and never enters the shared product. The vartime posture is
 /// justified because both call sites invert challenge-blinded products
 /// (zeros are negligibly likely, so the skip branch is never taken in
-/// practice and predicts perfectly), and this fork's `Field::invert` is
+/// practice and predicts perfectly), and this crate's `Field::invert` is
 /// already variable-time in its input (see the pasta_curves changelog), so
 /// constant-time skipping would spend selects protecting a channel the
 /// shared inversion already leaks.
