@@ -8,19 +8,9 @@ and this crate adheres to Rust's notion of
 the crate's public API and observable behavior from a consumer's perspective;
 internal implementation details are not tracked here.
 
-## About this fork
-
-`zakura-halo2-proofs` is Zakura's fork of the upstream `halo2_proofs` crate. This changelog
-begins at the fork point: upstream history up to the fork is documented in the
-upstream repository, and the fork's version lineage restarts at `1.0.0` rather
-than continuing the upstream `0.3.5` numbering.
-
-- Forked from: `halo2_proofs 0.3.5`, published from
-  [zcash/halo2](https://github.com/zcash/halo2) at commit
-  [`8e22adbd`](https://github.com/zcash/halo2/commit/8e22adbdce480e5db7625df56aff9c2c8ca79f8f).
-- Imported into this repository in commit `16d18d2a43d0aecdfcf9e9d02469c16ebf20e50b`.
-
 ## [Unreleased]
+
+## [1.0.0] - 2026-08-28
 
 ### Added
 
@@ -43,19 +33,19 @@ than continuing the upstream `0.3.5` numbering.
 ### Changed
 
 - Renamed the package from `halo2_proofs` to `zakura-halo2-proofs`; the library
-  target keeps its upstream name, so existing `use` paths compile unchanged.
+  target keeps its original name, so existing `use` paths compile unchanged.
 - Updated `ff` and `group` from 0.13 to 0.14 and `rand_core` from 0.6 to 0.10;
   the field and group traits in this crate's API come from the new releases,
   randomness parameters such as those of `create_proof` now bound the rand_core
   0.10 `Rng` trait (previously `RngCore`), and the `batch` feature sources
   system randomness through `rand` 0.10 instead of `rand_core`'s `getrandom`
   feature.
-- Replaced the upstream `pasta_curves` dependency with the Zakura fork
-  (`zakura-pasta-curves` 1.0.0), whose types appear in this crate's API.
-- Replaced the upstream `halo2_legacy_pdqsort` dependency with the Zakura fork
-  (`zakura-halo2-legacy-pdqsort` 1.0.0); it remains optional behind the
-  `floor-planner-v1-legacy-pdqsort` feature and its types do not appear in this
-  crate's API.
+- Replaced the `pasta_curves` dependency with `zakura-pasta-curves` 1.0.0,
+  whose types appear in this crate's API.
+- Replaced the `halo2_legacy_pdqsort` dependency with
+  `zakura-halo2-legacy-pdqsort` 1.0.0; it remains optional behind the
+  `floor-planner-v1-legacy-pdqsort` feature and its types do not appear in
+  this crate's API.
 - Required the circuit type passed to `create_proof` and `keygen_pk` to
   implement `Sync`, and its configuration to implement `Send`, so that witnesses
   for independent circuit instances can be synthesized in parallel.
@@ -63,13 +53,13 @@ than continuing the upstream `0.3.5` numbering.
   fixed circuit order before parallel work begins, and the polynomial masking
   the final commitment-opening scalar is sampled on a small fixed support
   instead of across the full degree range. Proofs generated from a seeded RNG
-  therefore differ byte-for-byte from upstream's, while the proof format and its
-  verification are unchanged, and proof bytes do not depend on the number of
-  threads.
+  therefore differ byte-for-byte from the original crate's, while the proof
+  format and its verification are unchanged, and proof bytes do not depend on
+  the number of threads.
 - Adopted variable-time algorithms for the prover's and verifier's
-  multiexponentiations and batch field inversions; proving time already depended
-  on inputs upstream, and the timing behavior of the underlying field arithmetic
-  is documented by `zakura-pasta-curves`.
+  multiexponentiations and batch field inversions; proving time already
+  depended on inputs in the original crate, and the timing behavior of the
+  underlying field arithmetic is documented by `zakura-pasta-curves`.
 - Sped up proof creation substantially; `create_proof` now scales across
   available threads and across the circuit instances proved in a single call,
   and the `multicore` feature also enables parallelism in the underlying Pasta
@@ -97,3 +87,16 @@ than continuing the upstream `0.3.5` numbering.
 - Fixed proving of custom-gate expressions whose rotation magnitude exceeds the
   circuit's row count; when evaluated over the extended domain, such rotations
   now wrap around the domain cyclically instead of panicking.
+
+## Record of Fork
+
+`zakura-halo2-proofs` began as a fork of the `halo2_proofs` crate and has been
+developed independently in this repository since. This changelog starts at the
+fork point: history up to that point is documented in the repository the code
+was forked from, and this crate's version lineage restarted at `1.0.0` rather
+than continuing the original `0.3.5` numbering.
+
+- Forked from: `halo2_proofs 0.3.5`, published from
+  [zcash/halo2](https://github.com/zcash/halo2) at commit
+  [`8e22adbd`](https://github.com/zcash/halo2/commit/8e22adbdce480e5db7625df56aff9c2c8ca79f8f).
+- Imported into this repository in commit `16d18d2a43d0aecdfcf9e9d02469c16ebf20e50b`.
