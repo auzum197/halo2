@@ -504,6 +504,26 @@ where
         .map(|poly| coset_evaluator.register_poly_ref(poly))
         .collect();
 
+    for family in pk.cached_selector_families.iter() {
+        let query_and_first_selector = fixed_cosets[family.column_index];
+        let combination_len = family.selectors.len() + 1;
+        coset_evaluator.register_compressed_selector(
+            query_and_first_selector,
+            combination_len,
+            1,
+            query_and_first_selector,
+        );
+        for (assigned_root, selector) in (2..).zip(family.selectors.iter()) {
+            let precomputed = coset_evaluator.register_poly_ref(selector);
+            coset_evaluator.register_compressed_selector(
+                query_and_first_selector,
+                combination_len,
+                assigned_root,
+                precomputed,
+            );
+        }
+    }
+
     // Register advice cosets with the polynomial evaluator.
     let advice_cosets: Vec<_> = advice
         .iter()
@@ -1324,4 +1344,160 @@ fn v1_proving_key_reuses_floor_plan() {
     .expect("proof generation with an incompatible plan should not fail");
     assert_eq!(MEASUREMENTS.load(Ordering::Relaxed), 1);
     assert_eq!(transcript.finalize(), first_proof);
+}
+
+#[test]
+fn compressed_selector_cache_preserves_proof() {
+    use crate::{
+        circuit::{Layouter, SimpleFloorPlanner},
+        plonk::{Expression, keygen_pk, keygen_vk},
+        poly::Rotation,
+        transcript::{Blake2bWrite, Challenge255},
+    };
+    use pasta_curves::EqAffine;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    const PROOF_SEED: u64 = 0x5345_4c45_4354_4f52;
+
+    #[derive(Clone, Copy, Debug)]
+    struct Config {
+        advice: Column<Advice>,
+        selectors: [Selector; crate::MIN_SELECTOR_FAMILY_LEN],
+    }
+
+    #[derive(Clone, Copy)]
+    struct MyCircuit;
+
+    impl<F: Field> Circuit<F> for MyCircuit {
+        type Config = Config;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            *self
+        }
+
+        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+            let advice = meta.advice_column();
+            let selectors = core::array::from_fn(|_| meta.selector());
+
+            for selector in selectors {
+                meta.create_gate("selector family", |meta| {
+                    let selector = meta.query_selector(selector);
+                    let advice = meta.query_advice(advice, Rotation::cur());
+                    vec![selector * (advice - Expression::Constant(F::ONE))]
+                });
+            }
+
+            // A constraint-system degree one greater than the family length
+            // can combine every degree-two selector expression into one fixed
+            // column.
+            meta.set_minimum_degree(crate::MIN_SELECTOR_FAMILY_LEN + 1);
+
+            Config { advice, selectors }
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl Layouter<F>,
+        ) -> Result<(), Error> {
+            layouter.assign_region(
+                || "selector family",
+                |mut region| {
+                    for (row, selector) in config.selectors.iter().enumerate() {
+                        selector.enable(&mut region, row)?;
+                        region.assign_advice(
+                            || "value",
+                            config.advice,
+                            row,
+                            || Value::known(F::ONE),
+                        )?;
+                    }
+                    Ok(())
+                },
+            )
+        }
+    }
+
+    fn create(pk: &ProvingKey<EqAffine>, params: &Params<EqAffine>) -> Vec<u8> {
+        let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+        create_proof(
+            params,
+            pk,
+            &[MyCircuit, MyCircuit],
+            &[&[], &[]],
+            StdRng::seed_from_u64(PROOF_SEED),
+            &mut transcript,
+        )
+        .expect("proof generation should not fail");
+        transcript.finalize()
+    }
+
+    let params = Params::new(4);
+    let create_pk = || {
+        let vk = keygen_vk(&params, &MyCircuit).expect("keygen_vk should not fail");
+        keygen_pk(&params, vk, &MyCircuit).expect("keygen_pk should not fail")
+    };
+    let pk = create_pk();
+    assert_eq!(pk.cached_selector_families.len(), 1);
+    assert_eq!(
+        pk.cached_selector_families[0].selectors.len() + 1,
+        crate::MIN_SELECTOR_FAMILY_LEN
+    );
+
+    // A family omitted by the cache budget retains its source coset and takes
+    // the generic evaluator path. Restore that state for every cached family.
+    let mut uncached_pk = pk.clone();
+    assert!(std::sync::Arc::ptr_eq(
+        &pk.cached_selector_families,
+        &uncached_pk.cached_selector_families,
+    ));
+    for family in pk.cached_selector_families.iter() {
+        let column_index = family.column_index;
+        uncached_pk.fixed_cosets[column_index] = uncached_pk
+            .vk
+            .domain
+            .coeff_to_extended(uncached_pk.fixed_polys[column_index].clone());
+    }
+    uncached_pk.cached_selector_families = Default::default();
+
+    assert_eq!(create(&pk, &params), create(&uncached_pk, &params));
+
+    #[cfg(feature = "multicore")]
+    {
+        let single_pool = maybe_rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        let parallel_pool = maybe_rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        let single_pk = single_pool.install(create_pk);
+        let parallel_pk = parallel_pool.install(create_pk);
+
+        assert_eq!(
+            single_pk.cached_selector_families.len(),
+            parallel_pk.cached_selector_families.len()
+        );
+        for (single, parallel) in single_pk
+            .cached_selector_families
+            .iter()
+            .zip(parallel_pk.cached_selector_families.iter())
+        {
+            assert_eq!(single.column_index, parallel.column_index);
+            assert_eq!(
+                &single_pk.fixed_cosets[single.column_index][..],
+                &parallel_pk.fixed_cosets[parallel.column_index][..]
+            );
+            assert_eq!(single.selectors.len(), parallel.selectors.len());
+            for (single, parallel) in single.selectors.iter().zip(parallel.selectors.iter()) {
+                assert_eq!(&single[..], &parallel[..]);
+            }
+        }
+
+        let single_proof = single_pool.install(|| create(&single_pk, &params));
+        let parallel_proof = parallel_pool.install(|| create(&parallel_pk, &params));
+        assert_eq!(single_proof, parallel_proof);
+    }
 }

@@ -38,7 +38,7 @@ pub use keygen::*;
 pub use prover::*;
 pub use verifier::*;
 
-use std::io;
+use std::{io, sync::Arc};
 
 fn commit_instance<C: CurveAffine>(params: &Params<C>, instance: &[C::Scalar]) -> C::Curve {
     let mut commitment = C::Curve::from(params.w);
@@ -148,12 +148,21 @@ pub struct ProvingKey<C: CurveAffine> {
     fixed_values: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
     fixed_polys: Vec<Polynomial<C::Scalar, Coeff>>,
     fixed_cosets: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>,
+    cached_selector_families: Arc<[CachedSelectorFamily<C::Scalar>]>,
     permutation: permutation::ProvingKey<C>,
     /// Kept out of [`VerifyingKey`] so verifier-only users do not pay its
     /// memory cost.
     fft_twiddles: ProvingKeyTwiddles<C::Scalar>,
     /// Circuit-type-erased floor-planning data produced during key generation.
     floor_plan: Option<FloorPlan>,
+}
+
+#[derive(Debug)]
+struct CachedSelectorFamily<F> {
+    // The source entry in `fixed_cosets` stores the selector for root one.
+    column_index: usize,
+    // The remaining entries correspond to roots two through the family size.
+    selectors: Box<[Polynomial<F, ExtendedLagrangeCoeff>]>,
 }
 
 impl<C: CurveAffine> ProvingKey<C> {
