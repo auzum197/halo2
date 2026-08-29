@@ -10,6 +10,8 @@ internal implementation details are not tracked here.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-28
+
 ### Changed
 
 - Renamed the package from `halo2_gadgets` to `zakura-halo2-gadgets`; the
