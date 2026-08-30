@@ -121,14 +121,38 @@ impl<F: Field> AdviceWitness<F> {
     }
 }
 
-// Each outer circuit task contains a two-way commitment/transform join. Leave
-// capacity for that nested work instead of consuming the whole pool with
-// circuit tasks.
+// Each outer permutation task contains a two-way commitment/transform join.
+// Leave capacity for that nested work instead of consuming the whole pool
+// with outer tasks.
 const PERMUTATION_INNER_WORKER_HEADROOM: usize = 2;
+// Bound a top-level estimate of the temporary storage added by preparing more
+// than one set at once. Ten scalar-sized buffers cover the current Pasta GLV
+// inputs, components, base preparation, product, and transform copies with
+// margin; one affine-base buffer is counted separately. Curve backends may use
+// opaque scratch that this estimate cannot model.
+const PERMUTATION_PARALLEL_ESTIMATED_SCRATCH_BUDGET_BYTES: usize = 8 * 1024 * 1024;
+const PERMUTATION_PARALLEL_SCRATCH_SCALAR_EQUIVALENTS: usize = 10;
 
-fn prepare_permutations_in_parallel(circuit_count: usize, worker_count: usize) -> bool {
-    circuit_count > 1
-        && worker_count.saturating_sub(circuit_count) >= PERMUTATION_INNER_WORKER_HEADROOM
+fn prepare_permutations_in_parallel(task_count: usize, worker_count: usize) -> bool {
+    task_count > 1 && worker_count.saturating_sub(task_count) >= PERMUTATION_INNER_WORKER_HEADROOM
+}
+
+fn prepare_permutation_sets_in_parallel<C: CurveAffine>(
+    set_count: usize,
+    worker_count: usize,
+    domain_size: usize,
+) -> bool {
+    if !prepare_permutations_in_parallel(set_count, worker_count) {
+        return false;
+    }
+
+    let scratch_bytes_per_row = std::mem::size_of::<C>()
+        + PERMUTATION_PARALLEL_SCRATCH_SCALAR_EQUIVALENTS * std::mem::size_of::<C::Scalar>();
+    set_count
+        .saturating_sub(1)
+        .checked_mul(domain_size)
+        .and_then(|rows| rows.checked_mul(scratch_bytes_per_row))
+        .is_some_and(|bytes| bytes <= PERMUTATION_PARALLEL_ESTIMATED_SCRATCH_BUDGET_BYTES)
 }
 
 struct WitnessCollection<'a, F: Field> {
@@ -616,60 +640,82 @@ where
     // Sample gamma challenge
     let gamma: ChallengeGamma<_> = transcript.squeeze_challenge_scalar();
 
-    let permutations: Vec<permutation::prover::Committed<C, _>> =
-        if prepare_permutations_in_parallel(instance.len(), crate::multicore::current_num_threads())
-        {
-            // Draw every permutation's blinding values in circuit and set
-            // order before preparing the independent arguments in parallel.
-            let permutation_blindings = (0..instance.len())
-                .map(|_| pk.vk.cs.permutation.sample_blinding(pk, &mut rng))
-                .collect::<Vec<_>>();
+    let permutation_workers = crate::multicore::current_num_threads();
+    let permutation_set_count = pk.vk.cs.permutation.set_count(pk.vk.cs_degree);
+    let permutations: Vec<permutation::prover::Committed<C, _>> = if instance.len() == 1
+        && prepare_permutation_sets_in_parallel::<C>(
+            permutation_set_count,
+            permutation_workers,
+            params.n as usize,
+        ) {
+        // A single circuit cannot use circuit-level permutation parallelism.
+        // Prepare its independent sets concurrently, then retain transcript
+        // writes in set order.
+        let blinding = pk.vk.cs.permutation.sample_blinding(pk, &mut rng);
+        let prepared = pk.vk.cs.permutation.prepare_sets_in_parallel(
+            params,
+            pk,
+            &pk.permutation,
+            &advice[0].advice_values,
+            &pk.fixed_values,
+            &instance[0].instance_values,
+            beta,
+            gamma,
+            blinding,
+        );
+        vec![prepared.commit(&mut coset_evaluator, transcript)?]
+    } else if prepare_permutations_in_parallel(instance.len(), permutation_workers) {
+        // Draw every permutation's blinding values in circuit and set
+        // order before preparing the independent arguments in parallel.
+        let permutation_blindings = (0..instance.len())
+            .map(|_| pk.vk.cs.permutation.sample_blinding(pk, &mut rng))
+            .collect::<Vec<_>>();
 
-            let prepared_permutations = (0..instance.len())
-                .into_par_iter()
-                .zip(permutation_blindings.into_par_iter())
-                .map(|(circuit_index, blinding)| {
-                    pk.vk.cs.permutation.prepare(
-                        params,
-                        pk,
-                        &pk.permutation,
-                        &advice[circuit_index].advice_values,
-                        &pk.fixed_values,
-                        &instance[circuit_index].instance_values,
-                        beta,
-                        gamma,
-                        blinding,
-                    )
-                })
-                .collect::<Vec<_>>();
+        let prepared_permutations = (0..instance.len())
+            .into_par_iter()
+            .zip(permutation_blindings.into_par_iter())
+            .map(|(circuit_index, blinding)| {
+                pk.vk.cs.permutation.prepare(
+                    params,
+                    pk,
+                    &pk.permutation,
+                    &advice[circuit_index].advice_values,
+                    &pk.fixed_values,
+                    &instance[circuit_index].instance_values,
+                    beta,
+                    gamma,
+                    blinding,
+                )
+            })
+            .collect::<Vec<_>>();
 
-            prepared_permutations
-                .into_iter()
-                .map(|permutation| permutation.commit(&mut coset_evaluator, transcript))
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            // Keep each circuit's preparation and commitment together on
-            // smaller pools to avoid competing for cache across circuits.
-            instance
-                .iter()
-                .zip(advice.iter())
-                .map(|(instance, advice)| {
-                    pk.vk.cs.permutation.commit(
-                        params,
-                        pk,
-                        &pk.permutation,
-                        &advice.advice_values,
-                        &pk.fixed_values,
-                        &instance.instance_values,
-                        beta,
-                        gamma,
-                        &mut coset_evaluator,
-                        &mut rng,
-                        transcript,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        };
+        prepared_permutations
+            .into_iter()
+            .map(|permutation| permutation.commit(&mut coset_evaluator, transcript))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        // Keep each circuit's preparation and commitment together on smaller
+        // pools to avoid competing for cache across circuits.
+        instance
+            .iter()
+            .zip(advice.iter())
+            .map(|(instance, advice)| {
+                pk.vk.cs.permutation.commit(
+                    params,
+                    pk,
+                    &pk.permutation,
+                    &advice.advice_values,
+                    &pk.fixed_values,
+                    &instance.instance_values,
+                    beta,
+                    gamma,
+                    &mut coset_evaluator,
+                    &mut rng,
+                    transcript,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
 
     let circuit_count = lookups.len();
     let mut lookup_product_tasks = Vec::with_capacity(circuit_count * lookup_count);
@@ -977,6 +1023,10 @@ fn permutation_outer_parallelism_reserves_inner_capacity() {
         (2, 2, false),
         (2, 3, false),
         (2, 4, true),
+        (3, 4, false),
+        (3, 5, true),
+        (3, 6, true),
+        (3, 10, true),
         (4, 5, false),
         (4, 6, true),
         (4, 10, true),
@@ -986,6 +1036,30 @@ fn permutation_outer_parallelism_reserves_inner_capacity() {
             expected
         );
     }
+}
+
+#[test]
+fn permutation_set_parallelism_limits_scratch() {
+    use pasta_curves::EqAffine;
+
+    const SMALL_DOMAIN_SIZE: usize = 1 << 11;
+    const LARGE_DOMAIN_SIZE: usize = 1 << 14;
+
+    assert!(prepare_permutation_sets_in_parallel::<EqAffine>(
+        3,
+        6,
+        SMALL_DOMAIN_SIZE,
+    ));
+    assert!(!prepare_permutation_sets_in_parallel::<EqAffine>(
+        3,
+        4,
+        SMALL_DOMAIN_SIZE,
+    ));
+    assert!(!prepare_permutation_sets_in_parallel::<EqAffine>(
+        3,
+        6,
+        LARGE_DOMAIN_SIZE,
+    ));
 }
 
 #[test]
