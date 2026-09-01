@@ -13,6 +13,7 @@ use crate::{
     plonk::{
         self, Error,
         evaluation::{EvaluationPoint, EvaluationQuery},
+        evaluator_schedule::QuotientPoly,
     },
     poly::{
         self, Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation,
@@ -115,6 +116,7 @@ impl Argument {
         instance: &[Polynomial<C::Scalar, LagrangeCoeff>],
         beta: ChallengeBeta<C>,
         gamma: ChallengeGamma<C>,
+        circuit_index: usize,
         evaluator: &mut poly::Evaluator<Ev, C::Scalar, ExtendedLagrangeCoeff>,
         mut rng: R,
         transcript: &mut T,
@@ -136,8 +138,15 @@ impl Argument {
                 Blind(C::Scalar::random(&mut rng))
             },
             |set| {
-                let permutation_product_coset =
-                    evaluator.register_poly(set.permutation_product_coset);
+                let set_index = sets.len();
+                let permutation_product_coset = evaluator.register_poly_with_tag(
+                    set.permutation_product_coset,
+                    QuotientPoly::PermutationProduct {
+                        circuit_index,
+                        set_index,
+                    }
+                    .into(),
+                );
 
                 // Hash the permutation product commitment
                 transcript.write_point(set.permutation_product_commitment)?;
@@ -366,8 +375,6 @@ pub(in crate::plonk) fn construct_constraints<E: Copy, F: WithSmallOrderMulGroup
     l0: poly::AstLeaf<E, ExtendedLagrangeCoeff>,
     l_blind: poly::AstLeaf<E, ExtendedLagrangeCoeff>,
     l_last: poly::AstLeaf<E, ExtendedLagrangeCoeff>,
-    beta: F,
-    gamma: F,
 ) -> Vec<poly::Ast<E, F, ExtendedLagrangeCoeff>> {
     let chunk_len = permutation_chunk_len(cs_degree);
     let last_rotation = Rotation(-((blinding_factors + 1) as i32));
@@ -416,21 +423,24 @@ pub(in crate::plonk) fn construct_constraints<E: Copy, F: WithSmallOrderMulGroup
                     .zip(cosets.iter())
                 {
                     left *= poly::Ast::<_, F, _>::from(*values)
-                        + (poly::Ast::ConstantTerm(beta) * poly::Ast::from(*permutation))
-                        + poly::Ast::ConstantTerm(gamma);
+                        + (poly::Ast::ChallengeTerm(poly::EvaluationChallenge::Beta)
+                            * poly::Ast::from(*permutation))
+                        + poly::Ast::ChallengeTerm(poly::EvaluationChallenge::Gamma);
                 }
 
                 let mut right = poly::Ast::from(*product);
-                let mut current_delta =
-                    beta * F::DELTA.pow_vartime([(chunk_index * chunk_len) as u64]);
+                let mut current_delta = F::DELTA.pow_vartime([(chunk_index * chunk_len) as u64]);
                 for values in columns.iter().map(|&column| match column.column_type() {
                     Any::Advice => &advice_cosets[column.index()],
                     Any::Fixed => &fixed_cosets[column.index()],
                     Any::Instance => &instance_cosets[column.index()],
                 }) {
                     right *= poly::Ast::from(*values)
-                        + poly::Ast::LinearTerm(current_delta)
-                        + poly::Ast::ConstantTerm(gamma);
+                        + poly::Ast::LinearChallengeTerm {
+                            challenge: poly::EvaluationChallenge::Beta,
+                            factor: current_delta,
+                        }
+                        + poly::Ast::ChallengeTerm(poly::EvaluationChallenge::Gamma);
                     current_delta *= &F::DELTA;
                 }
 
@@ -568,10 +578,18 @@ impl<C: CurveAffine> Prepared<C> {
         self,
         evaluator: &mut poly::Evaluator<Ev, C::Scalar, ExtendedLagrangeCoeff>,
         transcript: &mut T,
+        circuit_index: usize,
     ) -> Result<Committed<C, Ev>, Error> {
         let mut sets = Vec::with_capacity(self.sets.len());
-        for set in self.sets {
-            let permutation_product_coset = evaluator.register_poly(set.permutation_product_coset);
+        for (set_index, set) in self.sets.into_iter().enumerate() {
+            let permutation_product_coset = evaluator.register_poly_with_tag(
+                set.permutation_product_coset,
+                QuotientPoly::PermutationProduct {
+                    circuit_index,
+                    set_index,
+                }
+                .into(),
+            );
 
             // Hash the permutation product commitment
             transcript.write_point(set.permutation_product_commitment)?;
@@ -588,6 +606,20 @@ impl<C: CurveAffine> Prepared<C> {
 }
 
 impl<C: CurveAffine, Ev: Copy + Send + Sync> Committed<C, Ev> {
+    /// Finishes the permutation argument without rebuilding its quotient ASTs.
+    pub(in crate::plonk) fn into_constructed(self) -> Constructed<C> {
+        Constructed {
+            sets: self
+                .sets
+                .into_iter()
+                .map(|set| ConstructedSet {
+                    permutation_product_poly: set.permutation_product_poly,
+                    permutation_product_blind: set.permutation_product_blind,
+                })
+                .collect(),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(in crate::plonk) fn construct<'a>(
         self,
@@ -600,8 +632,6 @@ impl<C: CurveAffine, Ev: Copy + Send + Sync> Committed<C, Ev> {
         l0: poly::AstLeaf<Ev, ExtendedLagrangeCoeff>,
         l_blind: poly::AstLeaf<Ev, ExtendedLagrangeCoeff>,
         l_last: poly::AstLeaf<Ev, ExtendedLagrangeCoeff>,
-        beta: ChallengeBeta<C>,
-        gamma: ChallengeGamma<C>,
     ) -> (
         Constructed<C>,
         impl Iterator<Item = poly::Ast<Ev, C::Scalar, ExtendedLagrangeCoeff>> + 'a,
@@ -633,8 +663,6 @@ impl<C: CurveAffine, Ev: Copy + Send + Sync> Committed<C, Ev> {
             l0,
             l_blind,
             l_last,
-            *beta,
-            *gamma,
         );
 
         (constructed, expressions.into_iter())
