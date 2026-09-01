@@ -3,31 +3,148 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ff::WithSmallOrderMulGroup;
+use ff::{Field, WithSmallOrderMulGroup};
 use maybe_rayon::prelude::*;
 
 use super::{ProvingKey, circuit::Expression, lookup, permutation};
 use crate::{
     arithmetic::CurveAffine,
-    poly::{self, Ast, AstLeaf, EvaluationCacheLayout, ExtendedLagrangeCoeff},
+    poly::{self, Ast, AstLeaf, CompiledEvaluationPlan, ExtendedLagrangeCoeff},
 };
 
+// Candidates are inserted in this order, which is also their priority if the
+// aggregate cap cannot retain every shape.
 const RETAINED_QUOTIENT_CIRCUIT_COUNTS: [usize; 3] = [1, 2, 4];
-const MAX_RETAINED_QUOTIENT_CACHE_LAYOUT_BYTES: usize = 64 * 1024;
+// This bounds payload kept by the proving key after parallel keygen planning;
+// it is not a bound on transient keygen allocations.
+const MAX_RETAINED_QUOTIENT_PLAN_BYTES: usize = 1024 * 1024;
 
-// These values model a generic transcript challenge tuple. They are distinct
-// and avoid zero, one, minus one, and two because those values can alter AST
-// equality or scalar-specialized plan costs. A real proof still compiles its
-// challenge-bound AST and validates every sparse cache event exactly. Thus, an
-// unusual real challenge, a circuit literal that collides with a sample, or a
-// future topology change can only reject and replace this eager layout; it
-// cannot apply a stale schedule. A scalar field that reduces these samples
-// into a special or repeated value skips eager preparation and retains the
-// existing lazy path.
-const EAGER_LAYOUT_THETA: u64 = 0x9e37_79b9_7f4a_7c15;
-const EAGER_LAYOUT_BETA: u64 = 0xd1b5_4a32_d192_ed03;
-const EAGER_LAYOUT_GAMMA: u64 = 0x94d0_49bb_1331_11eb;
-const EAGER_LAYOUT_Y: u64 = 0x8538_eb43_2d3f_6a91;
+fn replacement_fits_payload_cap(
+    existing_payloads: impl IntoIterator<Item = (usize, usize)>,
+    replacement_index: usize,
+    replacement_bytes: usize,
+) -> bool {
+    existing_payloads
+        .into_iter()
+        .filter(|(index, _)| *index != replacement_index)
+        .map(|(_, bytes)| bytes)
+        .fold(replacement_bytes, usize::saturating_add)
+        <= MAX_RETAINED_QUOTIENT_PLAN_BYTES
+}
+
+#[derive(Clone, Copy)]
+#[repr(usize)]
+enum QuotientPolyRole {
+    Fixed,
+    Selector,
+    Advice,
+    Instance,
+    Permutation,
+    L0,
+    LBlind,
+    LLast,
+    LookupPermutedInput,
+    LookupPermutedTable,
+    PermutationProduct,
+    LookupProduct,
+}
+
+/// Semantic role of one polynomial in a compiled quotient plan.
+#[derive(Clone, Copy)]
+pub(in crate::plonk) enum QuotientPoly {
+    Fixed {
+        column_index: usize,
+    },
+    Selector {
+        family_index: usize,
+        assigned_root: usize,
+    },
+    Advice {
+        circuit_index: usize,
+        column_index: usize,
+    },
+    Instance {
+        circuit_index: usize,
+        column_index: usize,
+    },
+    Permutation {
+        column_index: usize,
+    },
+    L0,
+    LBlind,
+    LLast,
+    LookupPermutedInput {
+        circuit_index: usize,
+        lookup_index: usize,
+    },
+    LookupPermutedTable {
+        circuit_index: usize,
+        lookup_index: usize,
+    },
+    PermutationProduct {
+        circuit_index: usize,
+        set_index: usize,
+    },
+    LookupProduct {
+        circuit_index: usize,
+        lookup_index: usize,
+    },
+}
+
+impl From<QuotientPoly> for poly::EvaluationPolyTag {
+    fn from(tag: QuotientPoly) -> Self {
+        let (role, first, second) = match tag {
+            QuotientPoly::Fixed { column_index } => (QuotientPolyRole::Fixed, column_index, 0),
+            QuotientPoly::Selector {
+                family_index,
+                assigned_root,
+            } => (QuotientPolyRole::Selector, family_index, assigned_root),
+            QuotientPoly::Advice {
+                circuit_index,
+                column_index,
+            } => (QuotientPolyRole::Advice, circuit_index, column_index),
+            QuotientPoly::Instance {
+                circuit_index,
+                column_index,
+            } => (QuotientPolyRole::Instance, circuit_index, column_index),
+            QuotientPoly::Permutation { column_index } => {
+                (QuotientPolyRole::Permutation, column_index, 0)
+            }
+            QuotientPoly::L0 => (QuotientPolyRole::L0, 0, 0),
+            QuotientPoly::LBlind => (QuotientPolyRole::LBlind, 0, 0),
+            QuotientPoly::LLast => (QuotientPolyRole::LLast, 0, 0),
+            QuotientPoly::LookupPermutedInput {
+                circuit_index,
+                lookup_index,
+            } => (
+                QuotientPolyRole::LookupPermutedInput,
+                circuit_index,
+                lookup_index,
+            ),
+            QuotientPoly::LookupPermutedTable {
+                circuit_index,
+                lookup_index,
+            } => (
+                QuotientPolyRole::LookupPermutedTable,
+                circuit_index,
+                lookup_index,
+            ),
+            QuotientPoly::PermutationProduct {
+                circuit_index,
+                set_index,
+            } => (
+                QuotientPolyRole::PermutationProduct,
+                circuit_index,
+                set_index,
+            ),
+            QuotientPoly::LookupProduct {
+                circuit_index,
+                lookup_index,
+            } => (QuotientPolyRole::LookupProduct, circuit_index, lookup_index),
+        };
+        poly::EvaluationPolyTag::new(role as usize, first, second)
+    }
+}
 
 struct LookupTopology<E, F: WithSmallOrderMulGroup<3>> {
     compressed_input: Ast<E, F, ExtendedLagrangeCoeff>,
@@ -36,7 +153,12 @@ struct LookupTopology<E, F: WithSmallOrderMulGroup<3>> {
     permuted_table: AstLeaf<E, ExtendedLagrangeCoeff>,
 }
 
-fn expression_ast<E: Copy, F: WithSmallOrderMulGroup<3>>(
+/// Builds the gate AST shared by keygen planning and prover fallback.
+///
+/// Virtual selectors must already be removed. The leaf slices must come from
+/// complete fixed, advice, and instance registration in protocol column order;
+/// retained-plan validation checks their semantic tags before a hit.
+pub(in crate::plonk) fn expression_ast<E: Copy, F: WithSmallOrderMulGroup<3>>(
     expression: &Expression<F>,
     fixed: &[AstLeaf<E, ExtendedLagrangeCoeff>],
     advice: &[AstLeaf<E, ExtendedLagrangeCoeff>],
@@ -67,95 +189,95 @@ fn expression_ast<E: Copy, F: WithSmallOrderMulGroup<3>>(
     )
 }
 
-fn eager_challenges<F: WithSmallOrderMulGroup<3>>() -> Option<[F; 4]> {
-    let challenges = [
-        F::from(EAGER_LAYOUT_THETA),
-        F::from(EAGER_LAYOUT_BETA),
-        F::from(EAGER_LAYOUT_GAMMA),
-        F::from(EAGER_LAYOUT_Y),
-    ];
-    validate_eager_challenges(challenges)
+pub(super) struct QuotientPlans<F: Field> {
+    plans: Mutex<
+        [Option<Arc<CompiledEvaluationPlan<F, ExtendedLagrangeCoeff>>>;
+            RETAINED_QUOTIENT_CIRCUIT_COUNTS.len()],
+    >,
 }
 
-fn validate_eager_challenges<F: WithSmallOrderMulGroup<3>>(challenges: [F; 4]) -> Option<[F; 4]> {
-    let two = F::ONE.double();
-    let non_special = challenges.iter().all(|challenge| {
-        *challenge != F::ZERO && *challenge != F::ONE && *challenge != -F::ONE && *challenge != two
-    });
-    let distinct = challenges
-        .iter()
-        .enumerate()
-        .all(|(index, challenge)| !challenges[..index].contains(challenge));
-    (non_special && distinct).then_some(challenges)
-}
-
-pub(super) struct QuotientCacheLayouts {
-    layouts: Mutex<[Option<Arc<EvaluationCacheLayout>>; RETAINED_QUOTIENT_CIRCUIT_COUNTS.len()]>,
-}
-
-impl Default for QuotientCacheLayouts {
+impl<F: Field> Default for QuotientPlans<F> {
     fn default() -> Self {
         Self {
-            layouts: Mutex::new(std::array::from_fn(|_| None)),
+            plans: Mutex::new(std::array::from_fn(|_| None)),
         }
     }
 }
 
-impl fmt::Debug for QuotientCacheLayouts {
+impl<F: Field> fmt::Debug for QuotientPlans<F> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("QuotientCacheLayouts")
+            .debug_struct("QuotientPlans")
             .finish_non_exhaustive()
     }
 }
 
-impl QuotientCacheLayouts {
+impl<F: Field> QuotientPlans<F> {
     fn index(circuit_count: usize) -> Option<usize> {
         RETAINED_QUOTIENT_CIRCUIT_COUNTS
             .iter()
             .position(|count| *count == circuit_count)
     }
 
-    pub(super) fn get(&self, circuit_count: usize) -> Option<Arc<EvaluationCacheLayout>> {
+    pub(super) fn get(
+        &self,
+        circuit_count: usize,
+    ) -> Option<Arc<CompiledEvaluationPlan<F, ExtendedLagrangeCoeff>>> {
         let index = Self::index(circuit_count)?;
-        self.layouts
+        self.plans
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())[index]
             .clone()
     }
 
-    pub(super) fn retain(&self, circuit_count: usize, layout: EvaluationCacheLayout) {
+    pub(super) fn retain(
+        &self,
+        circuit_count: usize,
+        plan: CompiledEvaluationPlan<F, ExtendedLagrangeCoeff>,
+    ) {
+        if !plan.has_exact_polynomial_tags() {
+            return;
+        }
         let Some(index) = Self::index(circuit_count) else {
             return;
         };
-        let mut layouts = self
-            .layouts
+        let mut plans = self
+            .plans
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let existing_bytes = layouts
+        let existing_payloads = plans
             .iter()
             .enumerate()
-            .filter(|(candidate, _)| *candidate != index)
-            .filter_map(|(_, layout)| layout.as_ref())
-            .map(|layout| layout.payload_bytes())
-            .sum::<usize>();
-        if existing_bytes.saturating_add(layout.payload_bytes())
-            <= MAX_RETAINED_QUOTIENT_CACHE_LAYOUT_BYTES
-        {
-            layouts[index] = Some(Arc::new(layout));
+            .filter_map(|(index, plan)| plan.as_ref().map(|plan| (index, plan.payload_bytes())));
+        if replacement_fits_payload_cap(existing_payloads, index, plan.payload_bytes()) {
+            plans[index] = Some(Arc::new(plan));
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn swap_polynomial_tags(
+        &self,
+        circuit_count: usize,
+        lhs: QuotientPoly,
+        rhs: QuotientPoly,
+    ) {
+        let index = Self::index(circuit_count).expect("the circuit count is retained");
+        let mut plans = self
+            .plans
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let plan = Arc::get_mut(plans[index].as_mut().expect("the plan is retained"))
+            .expect("the retained plan has no external references");
+        plan.swap_polynomial_tags(lhs.into(), rhs.into());
     }
 }
 
-/// Prepares bounded quotient schedules from proving-key topology alone.
-pub(super) fn prepare_quotient_cache_layouts<C: CurveAffine>(pk: &ProvingKey<C>) {
+/// Prepares bounded compiled quotient plans from proving-key topology alone.
+pub(super) fn prepare_quotient_plans<C: CurveAffine>(pk: &ProvingKey<C>) {
     let cs = &pk.vk.cs;
-    let Some([theta, beta, gamma, y]) = eager_challenges::<C::Scalar>() else {
-        return;
-    };
     let permutation_set_count = cs.permutation.set_count(pk.vk.cs_degree);
 
-    let layouts = RETAINED_QUOTIENT_CIRCUIT_COUNTS
+    let plans = RETAINED_QUOTIENT_CIRCUIT_COUNTS
         .into_par_iter()
         .map(|circuit_count| {
             let mut evaluator = poly::new_virtual_evaluator(|| {});
@@ -163,9 +285,12 @@ pub(super) fn prepare_quotient_cache_layouts<C: CurveAffine>(pk: &ProvingKey<C>)
             // Keep this registration order synchronized with quotient setup in
             // `create_proof`. Exact validation fails closed if the order drifts.
             let fixed = (0..pk.fixed_cosets.len())
-                .map(|_| evaluator.register_virtual_poly())
+                .map(|column_index| {
+                    evaluator
+                        .register_virtual_poly_with_tag(QuotientPoly::Fixed { column_index }.into())
+                })
                 .collect::<Vec<_>>();
-            for family in pk.cached_selector_families.iter() {
+            for (family_index, family) in pk.cached_selector_families.iter().enumerate() {
                 let query_and_first_selector = fixed[family.column_index];
                 let combination_len = family.selectors.len() + 1;
                 evaluator.register_compressed_selector(
@@ -175,7 +300,13 @@ pub(super) fn prepare_quotient_cache_layouts<C: CurveAffine>(pk: &ProvingKey<C>)
                     query_and_first_selector,
                 );
                 for assigned_root in 2..=combination_len {
-                    let selector = evaluator.register_virtual_poly();
+                    let selector = evaluator.register_virtual_poly_with_tag(
+                        QuotientPoly::Selector {
+                            family_index,
+                            assigned_root,
+                        }
+                        .into(),
+                    );
                     evaluator.register_compressed_selector(
                         query_and_first_selector,
                         combination_len,
@@ -186,47 +317,78 @@ pub(super) fn prepare_quotient_cache_layouts<C: CurveAffine>(pk: &ProvingKey<C>)
             }
 
             let advice = (0..circuit_count)
-                .map(|_| {
+                .map(|circuit_index| {
                     (0..cs.num_advice_columns)
-                        .map(|_| evaluator.register_virtual_poly())
+                        .map(|column_index| {
+                            evaluator.register_virtual_poly_with_tag(
+                                QuotientPoly::Advice {
+                                    circuit_index,
+                                    column_index,
+                                }
+                                .into(),
+                            )
+                        })
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
             let instance = (0..circuit_count)
-                .map(|_| {
+                .map(|circuit_index| {
                     (0..cs.num_instance_columns)
-                        .map(|_| evaluator.register_virtual_poly())
+                        .map(|column_index| {
+                            evaluator.register_virtual_poly_with_tag(
+                                QuotientPoly::Instance {
+                                    circuit_index,
+                                    column_index,
+                                }
+                                .into(),
+                            )
+                        })
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
             let permutation_cosets = (0..pk.permutation.cosets.len())
-                .map(|_| evaluator.register_virtual_poly())
+                .map(|column_index| {
+                    evaluator.register_virtual_poly_with_tag(
+                        QuotientPoly::Permutation { column_index }.into(),
+                    )
+                })
                 .collect::<Vec<_>>();
-            let l0 = evaluator.register_virtual_poly();
-            let l_blind = evaluator.register_virtual_poly();
-            let l_last = evaluator.register_virtual_poly();
+            let l0 = evaluator.register_virtual_poly_with_tag(QuotientPoly::L0.into());
+            let l_blind = evaluator.register_virtual_poly_with_tag(QuotientPoly::LBlind.into());
+            let l_last = evaluator.register_virtual_poly_with_tag(QuotientPoly::LLast.into());
 
             let lookup_topologies = (0..circuit_count)
                 .map(|circuit_index| {
                     cs.lookups
                         .iter()
-                        .map(|lookup| {
+                        .enumerate()
+                        .map(|(lookup_index, lookup)| {
                             let compressed_input = lookup::prover::compress_expressions_coset(
                                 &lookup.input_expressions,
-                                theta,
                                 &fixed,
                                 &advice[circuit_index],
                                 &instance[circuit_index],
                             );
                             let compressed_table = lookup::prover::compress_expressions_coset(
                                 &lookup.table_expressions,
-                                theta,
                                 &fixed,
                                 &advice[circuit_index],
                                 &instance[circuit_index],
                             );
-                            let permuted_input = evaluator.register_virtual_poly();
-                            let permuted_table = evaluator.register_virtual_poly();
+                            let permuted_input = evaluator.register_virtual_poly_with_tag(
+                                QuotientPoly::LookupPermutedInput {
+                                    circuit_index,
+                                    lookup_index,
+                                }
+                                .into(),
+                            );
+                            let permuted_table = evaluator.register_virtual_poly_with_tag(
+                                QuotientPoly::LookupPermutedTable {
+                                    circuit_index,
+                                    lookup_index,
+                                }
+                                .into(),
+                            );
                             LookupTopology {
                                 compressed_input,
                                 permuted_input,
@@ -238,16 +400,32 @@ pub(super) fn prepare_quotient_cache_layouts<C: CurveAffine>(pk: &ProvingKey<C>)
                 })
                 .collect::<Vec<_>>();
             let permutation_products = (0..circuit_count)
-                .map(|_| {
+                .map(|circuit_index| {
                     (0..permutation_set_count)
-                        .map(|_| evaluator.register_virtual_poly())
+                        .map(|set_index| {
+                            evaluator.register_virtual_poly_with_tag(
+                                QuotientPoly::PermutationProduct {
+                                    circuit_index,
+                                    set_index,
+                                }
+                                .into(),
+                            )
+                        })
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
             let lookup_products = (0..circuit_count)
-                .map(|_| {
+                .map(|circuit_index| {
                     (0..cs.lookups.len())
-                        .map(|_| evaluator.register_virtual_poly())
+                        .map(|lookup_index| {
+                            evaluator.register_virtual_poly_with_tag(
+                                QuotientPoly::LookupProduct {
+                                    circuit_index,
+                                    lookup_index,
+                                }
+                                .into(),
+                            )
+                        })
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
@@ -282,8 +460,6 @@ pub(super) fn prepare_quotient_cache_layouts<C: CurveAffine>(pk: &ProvingKey<C>)
                     l0,
                     l_blind,
                     l_last,
-                    beta,
-                    gamma,
                 ));
                 for (lookup, product) in lookups.into_iter().zip(lookup_products) {
                     expressions.extend(lookup::prover::construct_constraints(
@@ -292,8 +468,6 @@ pub(super) fn prepare_quotient_cache_layouts<C: CurveAffine>(pk: &ProvingKey<C>)
                         lookup.compressed_table,
                         lookup.permuted_table,
                         product,
-                        beta,
-                        gamma,
                         l0,
                         l_blind,
                         l_last,
@@ -301,16 +475,16 @@ pub(super) fn prepare_quotient_cache_layouts<C: CurveAffine>(pk: &ProvingKey<C>)
                 }
             }
 
-            let quotient_numerator = Ast::distribute_powers(expressions, y);
-            evaluator
-                .prepare_cache_layout(&quotient_numerator, pk.vk.domain.extended_len())
-                .map(|layout| (circuit_count, layout))
+            let quotient_numerator =
+                Ast::distribute_challenge_powers(expressions, poly::EvaluationChallenge::Y);
+            let plan = evaluator
+                .prepare_compiled_quotient_plan(&quotient_numerator, pk.vk.domain.extended_len());
+            (circuit_count, plan)
         })
         .collect::<Vec<_>>();
-    // Retain in circuit-count order even though construction is parallel, so
-    // a future capacity-limited set of layouts remains deterministic.
-    for (circuit_count, layout) in layouts.into_iter().flatten() {
-        pk.quotient_cache_layouts.retain(circuit_count, layout);
+    // Retain in circuit-count order even though construction is parallel.
+    for (circuit_count, plan) in plans {
+        pk.quotient_plans.retain(circuit_count, plan);
     }
 }
 
@@ -321,21 +495,27 @@ mod tests {
     #[test]
     fn retained_counts_are_bounded() {
         assert_eq!(RETAINED_QUOTIENT_CIRCUIT_COUNTS, [1, 2, 4]);
-        assert_eq!(MAX_RETAINED_QUOTIENT_CACHE_LAYOUT_BYTES, 64 * 1024);
+        assert_eq!(MAX_RETAINED_QUOTIENT_PLAN_BYTES, 1024 * 1024);
     }
 
     #[test]
-    fn eager_challenge_reductions_fail_open() {
-        use pasta_curves::Fp;
-
-        assert!(eager_challenges::<Fp>().is_some());
-        assert!(
-            validate_eager_challenges([Fp::from(0), Fp::from(3), Fp::from(5), Fp::from(7)])
-                .is_none()
-        );
-        assert!(
-            validate_eager_challenges([Fp::from(3), Fp::from(3), Fp::from(5), Fp::from(7)])
-                .is_none()
-        );
+    fn retained_payload_cap_is_aggregate_and_replacement_aware() {
+        let cap = MAX_RETAINED_QUOTIENT_PLAN_BYTES;
+        assert!(replacement_fits_payload_cap(
+            [(0, cap), (1, cap / 2)],
+            0,
+            cap / 2,
+        ));
+        assert!(replacement_fits_payload_cap([(1, cap - 1)], 0, 1,));
+        assert!(!replacement_fits_payload_cap(
+            [(0, cap), (1, cap / 2)],
+            0,
+            cap / 2 + 1,
+        ));
+        assert!(!replacement_fits_payload_cap(
+            [(0, usize::MAX), (1, usize::MAX)],
+            2,
+            1,
+        ));
     }
 }

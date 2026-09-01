@@ -1,6 +1,6 @@
 use super::super::{
     ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX, Error, ProvingKey,
-    circuit::Expression,
+    circuit::Expression, evaluator_schedule::QuotientPoly,
 };
 use super::Argument;
 use crate::{
@@ -29,12 +29,12 @@ use std::{
 pub(in crate::plonk) struct Permuted<C: CurveAffine, Ev> {
     compressed_input_expression: Polynomial<C::Scalar, LagrangeCoeff>,
     permuted_input_expression: Polynomial<C::Scalar, LagrangeCoeff>,
-    compressed_input_coset: poly::Ast<Ev, C::Scalar, ExtendedLagrangeCoeff>,
+    compressed_input_coset: Option<poly::Ast<Ev, C::Scalar, ExtendedLagrangeCoeff>>,
     permuted_input_poly: Polynomial<C::Scalar, Coeff>,
     permuted_input_coset: poly::AstLeaf<Ev, ExtendedLagrangeCoeff>,
     permuted_input_blind: Blind<C::Scalar>,
     compressed_table_expression: Arc<Polynomial<C::Scalar, LagrangeCoeff>>,
-    compressed_table_coset: poly::Ast<Ev, C::Scalar, ExtendedLagrangeCoeff>,
+    compressed_table_coset: Option<poly::Ast<Ev, C::Scalar, ExtendedLagrangeCoeff>>,
     permuted_table_expression: Polynomial<C::Scalar, LagrangeCoeff>,
     permuted_table_poly: Polynomial<C::Scalar, Coeff>,
     permuted_table_coset: poly::AstLeaf<Ev, ExtendedLagrangeCoeff>,
@@ -72,13 +72,13 @@ pub(in crate::plonk) struct PermutedBlinding<F: Field> {
 pub(in crate::plonk) struct PreparedPermuted<C: CurveAffine, Ev> {
     compressed_input_expression: Polynomial<C::Scalar, LagrangeCoeff>,
     permuted_input_expression: Polynomial<C::Scalar, LagrangeCoeff>,
-    compressed_input_coset: poly::Ast<Ev, C::Scalar, ExtendedLagrangeCoeff>,
+    compressed_input_coset: Option<poly::Ast<Ev, C::Scalar, ExtendedLagrangeCoeff>>,
     permuted_input_poly: Polynomial<C::Scalar, Coeff>,
     permuted_input_coset: Polynomial<C::Scalar, ExtendedLagrangeCoeff>,
     permuted_input_commitment: C,
     permuted_input_blind: Blind<C::Scalar>,
     compressed_table_expression: Arc<Polynomial<C::Scalar, LagrangeCoeff>>,
-    compressed_table_coset: poly::Ast<Ev, C::Scalar, ExtendedLagrangeCoeff>,
+    compressed_table_coset: Option<poly::Ast<Ev, C::Scalar, ExtendedLagrangeCoeff>>,
     permuted_table_expression: Polynomial<C::Scalar, LagrangeCoeff>,
     permuted_table_poly: Polynomial<C::Scalar, Coeff>,
     permuted_table_coset: Polynomial<C::Scalar, ExtendedLagrangeCoeff>,
@@ -93,13 +93,13 @@ pub(in crate::plonk) struct ProductBlinding<F: Field> {
 
 struct PreparedTable<F: Field, Ev> {
     compressed_expression: Arc<Polynomial<F, LagrangeCoeff>>,
-    compressed_coset: poly::Ast<Ev, F, ExtendedLagrangeCoeff>,
+    compressed_coset: Option<poly::Ast<Ev, F, ExtendedLagrangeCoeff>>,
     sorted_values: Vec<F>,
 }
 
 struct PreparedInput<F: Field, Ev> {
     compressed_expression: Polynomial<F, LagrangeCoeff>,
-    compressed_coset: poly::Ast<Ev, F, ExtendedLagrangeCoeff>,
+    compressed_coset: Option<poly::Ast<Ev, F, ExtendedLagrangeCoeff>>,
     sorted_values: Vec<F>,
 }
 
@@ -249,7 +249,6 @@ pub(in crate::plonk) fn sample_product_blinding<C: CurveAffine, R: Rng>(
 /// Every [`Expression`] must have had its virtual selectors removed.
 pub(in crate::plonk) fn compress_expressions_coset<E: Copy, F: Field>(
     expressions: &[Expression<F>],
-    theta: F,
     fixed_cosets: &[poly::AstLeaf<E, ExtendedLagrangeCoeff>],
     advice_cosets: &[poly::AstLeaf<E, ExtendedLagrangeCoeff>],
     instance_cosets: &[poly::AstLeaf<E, ExtendedLagrangeCoeff>],
@@ -281,7 +280,9 @@ pub(in crate::plonk) fn compress_expressions_coset<E: Copy, F: Field>(
                 &|a, scalar| a * scalar,
             )
         })
-        .reduce(|acc, expression| acc * poly::Ast::ConstantTerm(theta) + expression)
+        .reduce(|acc, expression| {
+            acc * poly::Ast::ChallengeTerm(poly::EvaluationChallenge::Theta) + expression
+        })
         .unwrap_or(poly::Ast::ConstantTerm(F::ZERO))
 }
 
@@ -350,6 +351,7 @@ impl<F: WithSmallOrderMulGroup<3> + Ord> Argument<F> {
         fixed_values: &[poly::AstLeaf<Ev, LagrangeCoeff>],
         fixed_cosets: &[poly::AstLeaf<Ec, ExtendedLagrangeCoeff>],
         usable_rows: usize,
+        build_quotient_asts: bool,
         sort_scratch: &mut [PastaSortKey],
     ) -> PreparedTable<F, Ec> {
         let unpermuted_expressions = self.table_expressions.iter().map(|expression| {
@@ -360,21 +362,25 @@ impl<F: WithSmallOrderMulGroup<3> + Ord> Argument<F> {
                 .with_rotation(query.rotation)
                 .into()
         });
-        let unpermuted_cosets = self.table_expressions.iter().map(|expression| {
-            let Expression::Fixed(query) = expression else {
-                unreachable!("lookup table expressions are fixed queries")
-            };
-            fixed_cosets[query.column_index]
-                .with_rotation(query.rotation)
-                .into()
-        });
-
         let compressed_expression = unpermuted_expressions
             .reduce(|acc, expression| acc * theta + expression)
             .unwrap_or(poly::Ast::ConstantTerm(F::ZERO));
-        let compressed_coset = unpermuted_cosets
-            .reduce(|acc, expression| acc * poly::Ast::ConstantTerm(theta) + expression)
-            .unwrap_or(poly::Ast::ConstantTerm(F::ZERO));
+        let compressed_coset = build_quotient_asts.then(|| {
+            self.table_expressions
+                .iter()
+                .map(|expression| {
+                    let Expression::Fixed(query) = expression else {
+                        unreachable!("lookup table expressions are fixed queries")
+                    };
+                    fixed_cosets[query.column_index]
+                        .with_rotation(query.rotation)
+                        .into()
+                })
+                .reduce(|acc, expression| {
+                    acc * poly::Ast::ChallengeTerm(poly::EvaluationChallenge::Theta) + expression
+                })
+                .unwrap_or(poly::Ast::ConstantTerm(F::ZERO))
+        });
         let compressed_expression = value_evaluator.evaluate(&compressed_expression, domain);
         let mut sorted_values = compressed_expression
             .iter()
@@ -403,6 +409,7 @@ impl<F: WithSmallOrderMulGroup<3> + Ord> Argument<F> {
         fixed_cosets: &[poly::AstLeaf<Ec, ExtendedLagrangeCoeff>],
         instance_cosets: &[poly::AstLeaf<Ec, ExtendedLagrangeCoeff>],
         usable_rows: usize,
+        build_quotient_asts: bool,
     ) -> PreparedInput<F, Ec> {
         let unpermuted_expressions = self.input_expressions.iter().map(|expression| {
             expression.evaluate(
@@ -429,38 +436,42 @@ impl<F: WithSmallOrderMulGroup<3> + Ord> Argument<F> {
                 &|a, scalar| a * scalar,
             )
         });
-        let unpermuted_cosets = self.input_expressions.iter().map(|expression| {
-            expression.evaluate(
-                &|scalar| poly::Ast::ConstantTerm(scalar),
-                &|_| panic!("virtual selectors are removed during optimization"),
-                &|query| {
-                    fixed_cosets[query.column_index]
-                        .with_rotation(query.rotation)
-                        .into()
-                },
-                &|query| {
-                    advice_cosets[query.column_index]
-                        .with_rotation(query.rotation)
-                        .into()
-                },
-                &|query| {
-                    instance_cosets[query.column_index]
-                        .with_rotation(query.rotation)
-                        .into()
-                },
-                &|a| -a,
-                &|a, b| a + b,
-                &|a, b| a * b,
-                &|a, scalar| a * scalar,
-            )
-        });
-
         let compressed_expression = unpermuted_expressions
             .reduce(|acc, expression| acc * theta + expression)
             .unwrap_or(poly::Ast::ConstantTerm(F::ZERO));
-        let compressed_coset = unpermuted_cosets
-            .reduce(|acc, expression| acc * poly::Ast::ConstantTerm(theta) + expression)
-            .unwrap_or(poly::Ast::ConstantTerm(F::ZERO));
+        let compressed_coset = build_quotient_asts.then(|| {
+            self.input_expressions
+                .iter()
+                .map(|expression| {
+                    expression.evaluate(
+                        &poly::Ast::ConstantTerm,
+                        &|_| panic!("virtual selectors are removed during optimization"),
+                        &|query| {
+                            fixed_cosets[query.column_index]
+                                .with_rotation(query.rotation)
+                                .into()
+                        },
+                        &|query| {
+                            advice_cosets[query.column_index]
+                                .with_rotation(query.rotation)
+                                .into()
+                        },
+                        &|query| {
+                            instance_cosets[query.column_index]
+                                .with_rotation(query.rotation)
+                                .into()
+                        },
+                        &|a| -a,
+                        &|a, b| a + b,
+                        &|a, b| a * b,
+                        &|a, scalar| a * scalar,
+                    )
+                })
+                .reduce(|acc, expression| {
+                    acc * poly::Ast::ChallengeTerm(poly::EvaluationChallenge::Theta) + expression
+                })
+                .unwrap_or(poly::Ast::ConstantTerm(F::ZERO))
+        });
         let compressed_expression = value_evaluator.evaluate(&compressed_expression, domain);
         let mut sorted_values = compressed_expression
             .iter()
@@ -588,6 +599,7 @@ pub(in crate::plonk) fn prepare_permuted<C, Ev: Copy + Send + Sync, Ec: Copy + S
     advice_cosets: &[Vec<poly::AstLeaf<Ec, ExtendedLagrangeCoeff>>],
     fixed_cosets: &[poly::AstLeaf<Ec, ExtendedLagrangeCoeff>],
     instance_cosets: &[Vec<poly::AstLeaf<Ec, ExtendedLagrangeCoeff>>],
+    build_quotient_asts: bool,
 ) -> Result<Vec<PreparedPermuted<C, Ec>>, Error>
 where
     C: CurveAffine,
@@ -615,6 +627,7 @@ where
                     fixed_values,
                     fixed_cosets,
                     usable_rows,
+                    build_quotient_asts,
                     &mut sort_scratch,
                 )
             })
@@ -634,6 +647,7 @@ where
                     fixed_cosets,
                     &instance_cosets[circuit_index],
                     usable_rows,
+                    build_quotient_asts,
                 );
                 lookup_arguments[lookup_index].finish_permuted(
                     pk,
@@ -683,6 +697,7 @@ where
                     fixed_cosets,
                     &instance_cosets[circuit_index],
                     usable_rows,
+                    build_quotient_asts,
                 );
 
                 let mut pending = Some(PendingLookup {
@@ -732,6 +747,7 @@ where
                     fixed_values,
                     fixed_cosets,
                     usable_rows,
+                    build_quotient_asts,
                     &mut sort_scratch,
                 ));
                 let pending = {
@@ -770,12 +786,28 @@ impl<C: CurveAffine, Ev: Copy + Send + Sync> PreparedPermuted<C, Ev> {
         self,
         evaluator: &mut poly::Evaluator<Ev, C::Scalar, ExtendedLagrangeCoeff>,
         transcript: &mut T,
+        circuit_index: usize,
+        lookup_index: usize,
     ) -> Result<Permuted<C, Ev>, Error> {
         transcript.write_point(self.permuted_input_commitment)?;
         transcript.write_point(self.permuted_table_commitment)?;
 
-        let permuted_input_coset = evaluator.register_poly(self.permuted_input_coset);
-        let permuted_table_coset = evaluator.register_poly(self.permuted_table_coset);
+        let permuted_input_coset = evaluator.register_poly_with_tag(
+            self.permuted_input_coset,
+            QuotientPoly::LookupPermutedInput {
+                circuit_index,
+                lookup_index,
+            }
+            .into(),
+        );
+        let permuted_table_coset = evaluator.register_poly_with_tag(
+            self.permuted_table_coset,
+            QuotientPoly::LookupPermutedTable {
+                circuit_index,
+                lookup_index,
+            }
+            .into(),
+        );
 
         Ok(Permuted {
             compressed_input_expression: self.compressed_input_expression,
@@ -948,8 +980,17 @@ impl<C: CurveAffine, Ev: Copy + Send + Sync> PreparedProduct<C, Ev> {
         self,
         evaluator: &mut poly::Evaluator<Ev, C::Scalar, ExtendedLagrangeCoeff>,
         transcript: &mut T,
+        circuit_index: usize,
+        lookup_index: usize,
     ) -> Result<Committed<C, Ev>, Error> {
-        let product_coset = evaluator.register_poly(self.product_coset);
+        let product_coset = evaluator.register_poly_with_tag(
+            self.product_coset,
+            QuotientPoly::LookupProduct {
+                circuit_index,
+                lookup_index,
+            }
+            .into(),
+        );
 
         // Hash product commitment.
         transcript.write_point(self.product_commitment)?;
@@ -970,15 +1011,13 @@ pub(in crate::plonk) fn construct_constraints<E: Copy, F: Field>(
     compressed_table: poly::Ast<E, F, ExtendedLagrangeCoeff>,
     permuted_table: poly::AstLeaf<E, ExtendedLagrangeCoeff>,
     product: poly::AstLeaf<E, ExtendedLagrangeCoeff>,
-    beta: F,
-    gamma: F,
     l0: poly::AstLeaf<E, ExtendedLagrangeCoeff>,
     l_blind: poly::AstLeaf<E, ExtendedLagrangeCoeff>,
     l_last: poly::AstLeaf<E, ExtendedLagrangeCoeff>,
 ) -> impl Iterator<Item = poly::Ast<E, F, ExtendedLagrangeCoeff>> {
     let active_rows = poly::Ast::one() - (poly::Ast::from(l_last) + l_blind);
-    let beta = poly::Ast::ConstantTerm(beta);
-    let gamma = poly::Ast::ConstantTerm(gamma);
+    let beta = poly::Ast::ChallengeTerm(poly::EvaluationChallenge::Beta);
+    let gamma = poly::Ast::ChallengeTerm(poly::EvaluationChallenge::Gamma);
 
     iter::empty()
         // l_0(X) * (1 - z(X)) = 0
@@ -1018,15 +1057,30 @@ pub(in crate::plonk) fn construct_constraints<E: Copy, F: Field>(
 }
 
 impl<'a, C: CurveAffine, Ev: Copy + Send + Sync + 'a> Committed<C, Ev> {
+    /// Finishes the lookup argument without rebuilding its quotient ASTs.
+    pub(in crate::plonk) fn into_constructed(self) -> Constructed<C> {
+        Constructed {
+            permuted_input_poly: self.permuted.permuted_input_poly,
+            permuted_input_blind: self.permuted.permuted_input_blind,
+            permuted_table_poly: self.permuted.permuted_table_poly,
+            permuted_table_blind: self.permuted.permuted_table_blind,
+            product_poly: self.product_poly,
+            product_blind: self.product_blind,
+        }
+    }
+
     /// Given a Lookup with input expressions, table expressions, permuted input
     /// expression, permuted table expression, and grand product polynomial, this
     /// method constructs constraints that must hold between these values.
     /// This method returns the constraints as a vector of ASTs for polynomials in
     /// the extended evaluation domain.
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::plonk) fn construct(
         self,
-        beta: ChallengeBeta<C>,
-        gamma: ChallengeGamma<C>,
+        argument: &Argument<C::Scalar>,
+        fixed_cosets: &[poly::AstLeaf<Ev, ExtendedLagrangeCoeff>],
+        advice_cosets: &[poly::AstLeaf<Ev, ExtendedLagrangeCoeff>],
+        instance_cosets: &[poly::AstLeaf<Ev, ExtendedLagrangeCoeff>],
         l0: poly::AstLeaf<Ev, ExtendedLagrangeCoeff>,
         l_blind: poly::AstLeaf<Ev, ExtendedLagrangeCoeff>,
         l_last: poly::AstLeaf<Ev, ExtendedLagrangeCoeff>,
@@ -1035,14 +1089,28 @@ impl<'a, C: CurveAffine, Ev: Copy + Send + Sync + 'a> Committed<C, Ev> {
         impl Iterator<Item = poly::Ast<Ev, C::Scalar, ExtendedLagrangeCoeff>> + 'a,
     ) {
         let permuted = self.permuted;
+        let compressed_input_coset = permuted.compressed_input_coset.unwrap_or_else(|| {
+            compress_expressions_coset(
+                &argument.input_expressions,
+                fixed_cosets,
+                advice_cosets,
+                instance_cosets,
+            )
+        });
+        let compressed_table_coset = permuted.compressed_table_coset.unwrap_or_else(|| {
+            compress_expressions_coset(
+                &argument.table_expressions,
+                fixed_cosets,
+                advice_cosets,
+                instance_cosets,
+            )
+        });
         let expressions = construct_constraints(
-            permuted.compressed_input_coset,
+            compressed_input_coset,
             permuted.permuted_input_coset,
-            permuted.compressed_table_coset,
+            compressed_table_coset,
             permuted.permuted_table_coset,
             self.product_coset,
-            *beta,
-            *gamma,
             l0,
             l_blind,
             l_last,

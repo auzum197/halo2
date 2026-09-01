@@ -13,6 +13,7 @@ use super::{
     },
     commit_instance,
     evaluation::{EvaluationPoint, EvaluationQuery, PolynomialEvaluator},
+    evaluator_schedule::{self, QuotientPoly},
     lookup, permutation, vanishing,
 };
 
@@ -534,10 +535,14 @@ where
     let fixed_cosets: Vec<_> = pk
         .fixed_cosets
         .iter()
-        .map(|poly| coset_evaluator.register_poly_ref(poly))
+        .enumerate()
+        .map(|(column_index, poly)| {
+            coset_evaluator
+                .register_poly_ref_with_tag(poly, QuotientPoly::Fixed { column_index }.into())
+        })
         .collect();
 
-    for family in pk.cached_selector_families.iter() {
+    for (family_index, family) in pk.cached_selector_families.iter().enumerate() {
         let query_and_first_selector = fixed_cosets[family.column_index];
         let combination_len = family.selectors.len() + 1;
         coset_evaluator.register_compressed_selector(
@@ -547,7 +552,14 @@ where
             query_and_first_selector,
         );
         for (assigned_root, selector) in (2..).zip(family.selectors.iter()) {
-            let precomputed = coset_evaluator.register_poly_ref(selector);
+            let precomputed = coset_evaluator.register_poly_ref_with_tag(
+                selector,
+                QuotientPoly::Selector {
+                    family_index,
+                    assigned_root,
+                }
+                .into(),
+            );
             coset_evaluator.register_compressed_selector(
                 query_and_first_selector,
                 combination_len,
@@ -560,11 +572,22 @@ where
     // Register advice cosets with the polynomial evaluator.
     let advice_cosets: Vec<_> = advice
         .iter()
-        .map(|advice| {
+        .enumerate()
+        .map(|(circuit_index, advice)| {
             advice
                 .advice_cosets
                 .iter()
-                .map(|poly| coset_evaluator.register_poly_ref(poly))
+                .enumerate()
+                .map(|(column_index, poly)| {
+                    coset_evaluator.register_poly_ref_with_tag(
+                        poly,
+                        QuotientPoly::Advice {
+                            circuit_index,
+                            column_index,
+                        }
+                        .into(),
+                    )
+                })
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -572,11 +595,22 @@ where
     // Register instance cosets with the polynomial evaluator.
     let instance_cosets: Vec<_> = instance
         .iter()
-        .map(|instance| {
+        .enumerate()
+        .map(|(circuit_index, instance)| {
             instance
                 .instance_cosets
                 .iter()
-                .map(|poly| coset_evaluator.register_poly_ref(poly))
+                .enumerate()
+                .map(|(column_index, poly)| {
+                    coset_evaluator.register_poly_ref_with_tag(
+                        poly,
+                        QuotientPoly::Instance {
+                            circuit_index,
+                            column_index,
+                        }
+                        .into(),
+                    )
+                })
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -586,16 +620,29 @@ where
         .permutation
         .cosets
         .iter()
-        .map(|poly| coset_evaluator.register_poly_ref(poly))
+        .enumerate()
+        .map(|(column_index, poly)| {
+            coset_evaluator
+                .register_poly_ref_with_tag(poly, QuotientPoly::Permutation { column_index }.into())
+        })
         .collect();
 
     // Register boundary polynomials used in the lookup and permutation arguments.
-    let l0 = coset_evaluator.register_poly_ref(&pk.l0);
-    let l_blind = coset_evaluator.register_poly_ref(&pk.l_blind);
-    let l_last = coset_evaluator.register_poly_ref(&pk.l_last);
+    let l0 = coset_evaluator.register_poly_ref_with_tag(&pk.l0, QuotientPoly::L0.into());
+    let l_blind =
+        coset_evaluator.register_poly_ref_with_tag(&pk.l_blind, QuotientPoly::LBlind.into());
+    let l_last = coset_evaluator.register_poly_ref_with_tag(&pk.l_last, QuotientPoly::LLast.into());
 
     // Sample theta challenge for keeping lookup columns linearly independent
     let theta: ChallengeTheta<_> = transcript.squeeze_challenge_scalar();
+
+    // A plan candidate lets lookup preparation omit its symbolic quotient
+    // ASTs. Evaluator-shape validation remains deferred until every
+    // polynomial has been registered; a rejected candidate reconstructs them
+    // on the ordinary compilation path below.
+    let circuit_count = instance_values.len();
+    let compiled_plan = pk.quotient_plans.get(circuit_count);
+    let build_lookup_quotient_asts = compiled_plan.is_none();
 
     let lookup_count = pk.vk.cs.lookups.len();
     let mut lookup_tasks = Vec::new();
@@ -623,17 +670,23 @@ where
         &advice_cosets,
         &fixed_cosets,
         &instance_cosets,
+        build_lookup_quotient_asts,
     )?;
 
     let mut prepared_lookups = prepared_lookups.into_iter();
-    let lookups: Vec<Vec<lookup::prover::Permuted<C, _>>> = (0..instance_values.len())
-        .map(|_| {
+    let lookups: Vec<Vec<lookup::prover::Permuted<C, _>>> = (0..circuit_count)
+        .map(|circuit_index| {
             (0..lookup_count)
-                .map(|_| {
+                .map(|lookup_index| {
                     prepared_lookups
                         .next()
                         .expect("one prepared lookup per task")
-                        .finalize(&mut coset_evaluator, transcript)
+                        .finalize(
+                            &mut coset_evaluator,
+                            transcript,
+                            circuit_index,
+                            lookup_index,
+                        )
                 })
                 .collect()
         })
@@ -669,7 +722,7 @@ where
             gamma,
             blinding,
         );
-        vec![prepared.commit(&mut coset_evaluator, transcript)?]
+        vec![prepared.commit(&mut coset_evaluator, transcript, 0)?]
     } else if prepare_permutations_in_parallel(instance.len(), permutation_workers) {
         // Draw every permutation's blinding values in circuit and set
         // order before preparing the independent arguments in parallel.
@@ -697,7 +750,10 @@ where
 
         prepared_permutations
             .into_iter()
-            .map(|permutation| permutation.commit(&mut coset_evaluator, transcript))
+            .enumerate()
+            .map(|(circuit_index, permutation)| {
+                permutation.commit(&mut coset_evaluator, transcript, circuit_index)
+            })
             .collect::<Result<Vec<_>, _>>()?
     } else {
         // Keep each circuit's preparation and commitment together on smaller
@@ -705,7 +761,8 @@ where
         instance
             .iter()
             .zip(advice.iter())
-            .map(|(instance, advice)| {
+            .enumerate()
+            .map(|(circuit_index, (instance, advice))| {
                 pk.vk.cs.permutation.commit(
                     params,
                     pk,
@@ -715,6 +772,7 @@ where
                     &instance.instance_values,
                     beta,
                     gamma,
+                    circuit_index,
                     &mut coset_evaluator,
                     &mut rng,
                     transcript,
@@ -723,7 +781,7 @@ where
             .collect::<Result<Vec<_>, _>>()?
     };
 
-    let circuit_count = lookups.len();
+    debug_assert_eq!(lookups.len(), circuit_count);
     let mut lookup_product_tasks = Vec::with_capacity(circuit_count * lookup_count);
     // Draw all blinding values in circuit-major, lookup-major order before
     // preparing the independent lookup products in parallel.
@@ -742,13 +800,18 @@ where
 
     let mut prepared_lookup_products = prepared_lookup_products.into_iter();
     let lookups: Vec<Vec<lookup::prover::Committed<C, _>>> = (0..circuit_count)
-        .map(|_| {
+        .map(|circuit_index| {
             (0..lookup_count)
-                .map(|_| {
+                .map(|lookup_index| {
                     prepared_lookup_products
                         .next()
                         .expect("one prepared lookup product per task")
-                        .finalize(&mut coset_evaluator, transcript)
+                        .finalize(
+                            &mut coset_evaluator,
+                            transcript,
+                            circuit_index,
+                            lookup_index,
+                        )
                 })
                 .collect()
         })
@@ -763,98 +826,118 @@ where
     // Obtain challenge for keeping all separate gates linearly independent
     let y: ChallengeY<_> = transcript.squeeze_challenge_scalar();
 
-    // Evaluate the h(X) polynomial's constraint system expressions for the permutation constraints.
-    let (permutations, permutation_expressions): (Vec<_>, Vec<_>) = permutations
-        .into_iter()
-        .zip(advice_cosets.iter())
-        .zip(instance_cosets.iter())
-        .map(|((permutation, advice), instance)| {
-            permutation.construct(
-                pk,
-                &pk.vk.cs.permutation,
-                advice,
-                &fixed_cosets,
-                instance,
-                &permutation_cosets,
-                l0,
-                l_blind,
-                l_last,
-                beta,
-                gamma,
+    // Validate a keygen-prepared plan before using it to bypass every
+    // challenge-bound constraint AST allocation. A mismatch takes the full
+    // construction path and can replace the retained plan safely.
+    let compiled_plan = compiled_plan.filter(|plan| coset_evaluator.accepts_compiled_plan(plan));
+    let (permutations, lookups, expressions) = if compiled_plan.is_some() {
+        let permutations = permutations
+            .into_iter()
+            .map(permutation::prover::Committed::into_constructed)
+            .collect();
+        let lookups = lookups
+            .into_iter()
+            .map(|lookups| {
+                lookups
+                    .into_iter()
+                    .map(lookup::prover::Committed::into_constructed)
+                    .collect()
+            })
+            .collect();
+        (permutations, lookups, vec![])
+    } else {
+        // Build quotient ASTs only for an unprepared or mismatched shape.
+        let (permutations, permutation_expressions): (Vec<_>, Vec<Vec<_>>) = permutations
+            .into_iter()
+            .zip(advice_cosets.iter())
+            .zip(instance_cosets.iter())
+            .map(|((permutation, advice), instance)| {
+                let (constructed, expressions) = permutation.construct(
+                    pk,
+                    &pk.vk.cs.permutation,
+                    advice,
+                    &fixed_cosets,
+                    instance,
+                    &permutation_cosets,
+                    l0,
+                    l_blind,
+                    l_last,
+                );
+                (constructed, expressions.collect())
+            })
+            .unzip();
+
+        let (lookups, lookup_expressions): (Vec<Vec<_>>, Vec<Vec<Vec<_>>>) = lookups
+            .into_iter()
+            .zip(advice_cosets.iter())
+            .zip(instance_cosets.iter())
+            .map(|((lookups, advice_cosets), instance_cosets)| {
+                lookups
+                    .into_iter()
+                    .zip(meta.lookups.iter())
+                    .map(|(lookup, argument)| {
+                        let (constructed, expressions) = lookup.construct(
+                            argument,
+                            &fixed_cosets,
+                            advice_cosets,
+                            instance_cosets,
+                            l0,
+                            l_blind,
+                            l_last,
+                        );
+                        (constructed, expressions.collect())
+                    })
+                    .unzip()
+            })
+            .unzip();
+
+        let expressions = advice_cosets
+            .iter()
+            .zip(instance_cosets.iter())
+            .zip(permutation_expressions)
+            .zip(lookup_expressions)
+            .flat_map(
+                |(
+                    ((advice_cosets, instance_cosets), permutation_expressions),
+                    lookup_expressions,
+                )| {
+                    let fixed_cosets = &fixed_cosets;
+                    iter::empty()
+                        .chain(meta.gates.iter().flat_map(move |gate| {
+                            gate.polynomials().iter().map(move |expression| {
+                                evaluator_schedule::expression_ast(
+                                    expression,
+                                    fixed_cosets,
+                                    advice_cosets,
+                                    instance_cosets,
+                                )
+                            })
+                        }))
+                        .chain(permutation_expressions)
+                        .chain(lookup_expressions.into_iter().flatten())
+                },
             )
-        })
-        .unzip();
-
-    let (lookups, lookup_expressions): (Vec<Vec<_>>, Vec<Vec<_>>) = lookups
-        .into_iter()
-        .map(|lookups| {
-            // Evaluate the h(X) polynomial's constraint system expressions for the lookup constraints, if any.
-            lookups
-                .into_iter()
-                .map(|p| p.construct(beta, gamma, l0, l_blind, l_last))
-                .unzip()
-        })
-        .unzip();
-
-    let expressions = advice_cosets
-        .iter()
-        .zip(instance_cosets.iter())
-        .zip(permutation_expressions)
-        .zip(lookup_expressions)
-        .flat_map(
-            |(((advice_cosets, instance_cosets), permutation_expressions), lookup_expressions)| {
-                let fixed_cosets = &fixed_cosets;
-                iter::empty()
-                    // Custom constraints
-                    .chain(meta.gates.iter().flat_map(move |gate| {
-                        gate.polynomials().iter().map(move |expr| {
-                            expr.evaluate(
-                                &poly::Ast::ConstantTerm,
-                                &|_| panic!("virtual selectors are removed during optimization"),
-                                &|query| {
-                                    fixed_cosets[query.column_index]
-                                        .with_rotation(query.rotation)
-                                        .into()
-                                },
-                                &|query| {
-                                    advice_cosets[query.column_index]
-                                        .with_rotation(query.rotation)
-                                        .into()
-                                },
-                                &|query| {
-                                    instance_cosets[query.column_index]
-                                        .with_rotation(query.rotation)
-                                        .into()
-                                },
-                                &|a| -a,
-                                &|a, b| a + b,
-                                &|a, b| a * b,
-                                &|a, scalar| a * scalar,
-                            )
-                        })
-                    }))
-                    // Permutation constraints, if any.
-                    .chain(permutation_expressions)
-                    // Lookup constraints, if any.
-                    .chain(lookup_expressions.into_iter().flatten())
-            },
-        );
+            .collect();
+        (permutations, lookups, expressions)
+    };
 
     // Construct and commit to the quotient polynomial h(X).
-    let cache_layout = pk.quotient_cache_layouts.get(circuit_count);
-    let (vanishing, prepared_layout) = vanishing.construct_quotient(
+    let (vanishing, prepared_plan) = vanishing.construct_quotient(
         params,
         domain,
         &pk.fft_twiddles,
         coset_evaluator,
-        expressions,
+        expressions.into_iter(),
+        theta,
+        beta,
+        gamma,
         y,
-        cache_layout.as_deref(),
+        compiled_plan.as_deref(),
         &mut rng,
         transcript,
     )?;
-    if let Some(layout) = prepared_layout {
-        pk.quotient_cache_layouts.retain(circuit_count, layout);
+    if let Some(plan) = prepared_plan {
+        pk.quotient_plans.retain(circuit_count, plan);
     }
 
     let x: ChallengeX<_> = transcript.squeeze_challenge_scalar();
@@ -1474,9 +1557,9 @@ fn compressed_selector_cache_preserves_proof() {
 
     #[derive(Clone, Copy, Debug)]
     struct Config {
-        advice: Column<Advice>,
+        advice: [Column<Advice>; 4],
         selectors: [Selector; crate::MIN_SELECTOR_FAMILY_LEN],
-        table: TableColumn,
+        table: [TableColumn; 2],
     }
 
     #[derive(Clone, Copy)]
@@ -1491,21 +1574,40 @@ fn compressed_selector_cache_preserves_proof() {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            let advice = meta.advice_column();
+            let advice = core::array::from_fn(|_| meta.advice_column());
+            let instance = meta.instance_column();
             let selectors = core::array::from_fn(|_| meta.selector());
-            let table = meta.lookup_table_column();
+            let table = [meta.lookup_table_column(), meta.lookup_table_column()];
 
-            meta.enable_equality(advice);
+            for column in advice {
+                meta.enable_equality(column);
+            }
+            meta.enable_equality(instance);
+
             meta.lookup(|meta| {
-                let advice = meta.query_advice(advice, Rotation::cur());
-                vec![(advice, table)]
+                advice[..2]
+                    .iter()
+                    .zip(table)
+                    .map(|(advice, table)| (meta.query_advice(*advice, Rotation::cur()), table))
+                    .collect()
+            });
+            meta.lookup(|meta| {
+                advice[2..]
+                    .iter()
+                    .zip(table)
+                    .map(|(advice, table)| (meta.query_advice(*advice, Rotation::cur()), table))
+                    .collect()
             });
 
             for selector in selectors {
                 meta.create_gate("selector family", |meta| {
                     let selector = meta.query_selector(selector);
-                    let advice = meta.query_advice(advice, Rotation::cur());
-                    vec![selector * (advice - Expression::Constant(F::ONE))]
+                    let advice = meta.query_advice(advice[0], Rotation::cur());
+                    let instance = meta.query_instance(instance, Rotation::cur());
+                    vec![
+                        selector.clone() * (advice - Expression::Constant(F::ONE)),
+                        selector * instance,
+                    ]
                 });
             }
 
@@ -1527,10 +1629,13 @@ fn compressed_selector_cache_preserves_proof() {
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
             layouter.assign_table(
-                || "lookup table",
+                || "two-column lookup table",
                 |mut table| {
-                    table.assign_cell(|| "zero", config.table, 0, || Value::known(F::ZERO))?;
-                    table.assign_cell(|| "one", config.table, 1, || Value::known(F::ONE))?;
+                    for (row, value) in [F::ZERO, F::ONE].into_iter().enumerate() {
+                        for column in config.table {
+                            table.assign_cell(|| "value", column, row, || Value::known(value))?;
+                        }
+                    }
                     Ok(())
                 },
             )?;
@@ -1539,12 +1644,14 @@ fn compressed_selector_cache_preserves_proof() {
                 |mut region| {
                     for (row, selector) in config.selectors.iter().enumerate() {
                         selector.enable(&mut region, row)?;
-                        region.assign_advice(
-                            || "value",
-                            config.advice,
-                            row,
-                            || Value::known(F::ONE),
-                        )?;
+                        for advice in config.advice {
+                            region.assign_advice(
+                                || "value",
+                                advice,
+                                row,
+                                || Value::known(F::ONE),
+                            )?;
+                        }
                     }
                     Ok(())
                 },
@@ -1559,8 +1666,9 @@ fn compressed_selector_cache_preserves_proof() {
         seed: u64,
     ) -> Vec<u8> {
         let circuits = [MyCircuit; 4];
-        let no_instance_columns: &[&[Fp]] = &[];
-        let instances = [no_instance_columns; 4];
+        let empty_instance: &[Fp] = &[];
+        let instance_columns: &[&[Fp]] = &[empty_instance];
+        let instances = [instance_columns; 4];
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof(
             params,
@@ -1580,8 +1688,9 @@ fn compressed_selector_cache_preserves_proof() {
         circuit_count: usize,
         proof: &[u8],
     ) {
-        let no_instance_columns: &[&[Fp]] = &[];
-        let instances = [no_instance_columns; 4];
+        let empty_instance: &[Fp] = &[];
+        let instance_columns: &[&[Fp]] = &[empty_instance];
+        let instances = [instance_columns; 4];
         let strategy = SingleVerifier::new(params);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(proof);
         verify_proof(
@@ -1593,7 +1702,6 @@ fn compressed_selector_cache_preserves_proof() {
         )
         .expect("proof verification should not fail");
     }
-
     let params = Params::new(4);
     let create_pk = || {
         let vk = keygen_vk(&params, &MyCircuit).expect("keygen_vk should not fail");
@@ -1605,27 +1713,36 @@ fn compressed_selector_cache_preserves_proof() {
         pk.cached_selector_families[0].selectors.len() + 1,
         crate::MIN_SELECTOR_FAMILY_LEN
     );
-    assert!(pk.quotient_cache_layouts.get(3).is_none());
+    assert_eq!(pk.vk.cs.num_instance_columns, 1);
+    assert_eq!(pk.vk.cs.lookups.len(), 2);
+    assert!(
+        pk.vk
+            .cs
+            .lookups
+            .iter()
+            .all(|lookup| lookup.input_expressions.len() == 2)
+    );
+    assert!(pk.vk.cs.permutation.set_count(pk.vk.cs_degree) >= 2);
+    assert!(pk.quotient_plans.get(3).is_none());
 
-    // Key generation prepares every retained shape before any proof. The
-    // first proof must keep that exact Arc, rather than falling back and
-    // replacing a mismatched schedule. An empty-layout key provides the
+    // Key generation compiles every retained shape before any proof. The
+    // first proof must keep that exact Arc. An empty-plan key provides the
     // byte-for-byte control for 1, 2, and 4 circuits.
     let mut eager_proofs = vec![];
     for circuit_count in [1, 2, 4] {
-        let eager_layout = pk
-            .quotient_cache_layouts
+        let eager_plan = pk
+            .quotient_plans
             .get(circuit_count)
-            .expect("keygen prepares each retained quotient layout");
+            .expect("keygen compiles each retained quotient plan");
         let eager_proof = create(&pk, &params, circuit_count, PROOF_SEED);
-        let retained_layout = pk
-            .quotient_cache_layouts
+        let retained_plan = pk
+            .quotient_plans
             .get(circuit_count)
-            .expect("the first proof retains its eager layout");
-        assert!(std::sync::Arc::ptr_eq(&eager_layout, &retained_layout));
+            .expect("the first proof retains its keygen plan");
+        assert!(std::sync::Arc::ptr_eq(&eager_plan, &retained_plan));
 
         let mut lazy_pk = pk.clone();
-        lazy_pk.quotient_cache_layouts = std::sync::Arc::new(Default::default());
+        lazy_pk.quotient_plans = std::sync::Arc::new(Default::default());
         let lazy_proof = create(&lazy_pk, &params, circuit_count, PROOF_SEED);
         assert_eq!(eager_proof, lazy_proof);
         verify(&pk, &params, circuit_count, &eager_proof);
@@ -1633,23 +1750,80 @@ fn compressed_selector_cache_preserves_proof() {
     }
 
     // A different seed changes commitments before theta is sampled. The
-    // eager sparse schedule remains valid for the resulting challenge-bound
-    // plan, while proof bytes still match a freshly planned control.
+    // symbolic plan binds the resulting challenges, while proof bytes still
+    // match a freshly planned control.
     let alternate_seed = PROOF_SEED ^ 0xa11c_e55e_7e57_0001;
-    let eager_layout = pk.quotient_cache_layouts.get(1).unwrap();
+    let eager_plan = pk.quotient_plans.get(1).unwrap();
     let alternate_proof = create(&pk, &params, 1, alternate_seed);
     assert_ne!(alternate_proof, eager_proofs[0]);
     assert!(std::sync::Arc::ptr_eq(
-        &eager_layout,
-        &pk.quotient_cache_layouts.get(1).unwrap()
+        &eager_plan,
+        &pk.quotient_plans.get(1).unwrap()
     ));
     let mut alternate_lazy_pk = pk.clone();
-    alternate_lazy_pk.quotient_cache_layouts = std::sync::Arc::new(Default::default());
+    alternate_lazy_pk.quotient_plans = std::sync::Arc::new(Default::default());
     assert_eq!(
         alternate_proof,
         create(&alternate_lazy_pk, &params, 1, alternate_seed)
     );
     verify(&pk, &params, 1, &alternate_proof);
+
+    // A candidate is selected before lookup preparation, so an exact shape
+    // mismatch must reconstruct the omitted lookup ASTs before falling back.
+    // Removing compressed-selector registration changes the evaluator shape
+    // without changing the constraint system or proof bytes.
+    let mut mismatched_pk = create_pk();
+    let rejected_plan = mismatched_pk.quotient_plans.get(2).unwrap();
+    for family in mismatched_pk.cached_selector_families.iter() {
+        let column_index = family.column_index;
+        mismatched_pk.fixed_cosets[column_index] = mismatched_pk
+            .vk
+            .domain
+            .coeff_to_extended(mismatched_pk.fixed_polys[column_index].clone());
+    }
+    mismatched_pk.cached_selector_families = Default::default();
+    let fallback_proof = create(&mismatched_pk, &params, 2, PROOF_SEED);
+    assert_eq!(fallback_proof, eager_proofs[1]);
+    assert!(!std::sync::Arc::ptr_eq(
+        &rejected_plan,
+        &mismatched_pk.quotient_plans.get(2).unwrap()
+    ));
+    verify(&mismatched_pk, &params, 2, &fallback_proof);
+
+    // Equal polynomial counts and lengths are insufficient. Swap tags across
+    // instance/lookup and permutation/lookup-product roles that appear more
+    // than once, and require the byte-identical fallback.
+    let swapped_tag_pk = create_pk();
+    swapped_tag_pk.quotient_plans.swap_polynomial_tags(
+        2,
+        QuotientPoly::Instance {
+            circuit_index: 0,
+            column_index: 0,
+        },
+        QuotientPoly::LookupPermutedTable {
+            circuit_index: 1,
+            lookup_index: 1,
+        },
+    );
+    swapped_tag_pk.quotient_plans.swap_polynomial_tags(
+        2,
+        QuotientPoly::PermutationProduct {
+            circuit_index: 0,
+            set_index: 1,
+        },
+        QuotientPoly::LookupProduct {
+            circuit_index: 1,
+            lookup_index: 0,
+        },
+    );
+    let rejected_plan = swapped_tag_pk.quotient_plans.get(2).unwrap();
+    let fallback_proof = create(&swapped_tag_pk, &params, 2, PROOF_SEED);
+    assert_eq!(fallback_proof, eager_proofs[1]);
+    assert!(!std::sync::Arc::ptr_eq(
+        &rejected_plan,
+        &swapped_tag_pk.quotient_plans.get(2).unwrap()
+    ));
+    verify(&swapped_tag_pk, &params, 2, &fallback_proof);
 
     // A family omitted by the cache budget retains its source coset and takes
     // the generic evaluator path. Restore that state for every cached family.
@@ -1666,17 +1840,17 @@ fn compressed_selector_cache_preserves_proof() {
             .coeff_to_extended(uncached_pk.fixed_polys[column_index].clone());
     }
     uncached_pk.cached_selector_families = Default::default();
-    uncached_pk.quotient_cache_layouts = std::sync::Arc::new(Default::default());
+    uncached_pk.quotient_plans = std::sync::Arc::new(Default::default());
 
     assert_eq!(
         create(&pk, &params, 2, PROOF_SEED),
         create(&uncached_pk, &params, 2, PROOF_SEED)
     );
 
-    // Concurrent first proofs share the keygen-prepared schedule without
+    // Concurrent first proofs share the keygen-compiled plan without
     // replacement and preserve deterministic proof bytes.
     let concurrent_pk = create_pk();
-    let eager_layout = concurrent_pk.quotient_cache_layouts.get(4).unwrap();
+    let eager_plan = concurrent_pk.quotient_plans.get(4).unwrap();
     let (first, second) = std::thread::scope(|scope| {
         let first = scope.spawn(|| create(&concurrent_pk, &params, 4, PROOF_SEED));
         let second = scope.spawn(|| create(&concurrent_pk, &params, 4, PROOF_SEED));
@@ -1684,9 +1858,30 @@ fn compressed_selector_cache_preserves_proof() {
     });
     assert_eq!(first, second);
     assert!(std::sync::Arc::ptr_eq(
-        &eager_layout,
-        &concurrent_pk.quotient_cache_layouts.get(4).unwrap()
+        &eager_plan,
+        &concurrent_pk.quotient_plans.get(4).unwrap()
     ));
+
+    // Concurrent cold proofs can both miss without racing plan replacement or
+    // changing proof bytes.
+    let mut cold_pk = create_pk();
+    cold_pk.quotient_plans = std::sync::Arc::new(Default::default());
+    let barrier = std::sync::Barrier::new(3);
+    let (first, second) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            barrier.wait();
+            create(&cold_pk, &params, 2, PROOF_SEED)
+        });
+        let second = scope.spawn(|| {
+            barrier.wait();
+            create(&cold_pk, &params, 2, PROOF_SEED)
+        });
+        barrier.wait();
+        (first.join().unwrap(), second.join().unwrap())
+    });
+    assert_eq!(first, second);
+    assert!(cold_pk.quotient_plans.get(2).is_some());
+    verify(&cold_pk, &params, 2, &first);
 
     #[cfg(feature = "multicore")]
     {
