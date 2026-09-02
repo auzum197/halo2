@@ -1,7 +1,33 @@
 [workspace]
+resolver = "2"
 members = [
     "halo2",
     "halo2_gadgets",
     "halo2_poseidon",
     "halo2_proofs",
 ]
+
+[workspace.package]
+version = "1.0.1"
+authors = [
+    "Dev Ojha <ValarDragon@users.noreply.github.com>",
+    "Sean Bowe <ewillbefull@gmail.com>",
+]
+edition = "2024"
+rust-version = "1.91"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/auzum197/halo2"
+readme = "README.md"
+
+# Intra-workspace edges keep the upstream dependency keys via `package = "zakura-*"`
+# renames, so `use` paths in the crates stay unchanged. The remaining members of
+# the zakura proving stack (pasta_curves, sinsemilla, halo2_legacy_pdqsort) are
+# consumed from the zakura-core/common monorepo, pinned to the same revision
+# that auzum-orchard pins.
+[workspace.dependencies]
+halo2_gadgets = { package = "zakura-halo2-gadgets", version = "1.0.1", path = "halo2_gadgets", default-features = false }
+halo2_poseidon = { package = "zakura-halo2-poseidon", version = "1.0.1", path = "halo2_poseidon", default-features = false }
+halo2_proofs = { package = "zakura-halo2-proofs", version = "1.0.1", path = "halo2_proofs", default-features = false }
+halo2_legacy_pdqsort = { package = "zakura-halo2-legacy-pdqsort", git = "https://github.com/zakura-core/common.git", rev = "052100f9b9e0f67d2c6aa0406e780f098b94c2a2", default-features = false }
+pasta_curves = { package = "zakura-pasta-curves", git = "https://github.com/zakura-core/common.git", rev = "052100f9b9e0f67d2c6aa0406e780f098b94c2a2", default-features = false }
+sinsemilla = { package = "zakura-sinsemilla", git = "https://github.com/zakura-core/common.git", rev = "052100f9b9e0f67d2c6aa0406e780f098b94c2a2", default-features = false }
