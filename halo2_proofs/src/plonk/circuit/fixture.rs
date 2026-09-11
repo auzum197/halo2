@@ -4,7 +4,7 @@ use ff::Field;
 
 use crate::poly::Rotation;
 
-use super::{compress_selectors, Any, Column, ConstraintSystem, Expression, Fixed, FixedQuery};
+use super::{Any, Column, ConstraintSystem, Expression, Fixed, FixedQuery, compress_selectors};
 
 /// One selector's compressed-column assignment: selector index, combination index,
 /// and assigned root.
@@ -21,7 +21,7 @@ impl<F: Field> ConstraintSystem<F> {
     pub fn lean_dump_compress_selectors(&self, selectors: Vec<Vec<bool>>) -> (usize, Vec<Vec<F>>) {
         let cs = self.clone();
         let before = cs.num_fixed_columns;
-        let (_cs2, polys) = cs.compress_selectors(selectors);
+        let (_cs2, polys, _assignments) = cs.compress_selectors(selectors);
         (before, polys)
     }
 
@@ -29,7 +29,7 @@ impl<F: Field> ConstraintSystem<F> {
     /// clone (the keygen transformation), for symbolic post-fixture dumping.
     pub fn lean_dump_compressed(&self, selectors: Vec<Vec<bool>>) -> ConstraintSystem<F> {
         let cs = self.clone();
-        let (cs2, _polys) = cs.compress_selectors(selectors);
+        let (cs2, _polys, _assignments) = cs.compress_selectors(selectors);
         cs2
     }
 
@@ -231,7 +231,7 @@ end {}
                     .map(|expression| fmt_expr(expression, fmt_f))
                     .collect::<Vec<_>>()
                     .join(",");
-                format!("{{\"inputs\":[{inputs}],\"tables\":[{tables}]}}")
+                format!("{{\"inputs\":[{}],\"tables\":[{}]}}", inputs, tables)
             })
             .collect::<Vec<_>>()
             .join(",");

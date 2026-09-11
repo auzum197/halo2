@@ -1,6 +1,6 @@
 //! Exact exporters for Ironwood's isolated Add and Mul circuit fixtures.
 
-use super::{add, mul, CircuitVersion, EccPoint, NonIdentityEccPoint};
+use super::{CircuitVersion, EccPoint, NonIdentityEccPoint, add, mul};
 use crate::utilities::lookup_range_check::{LookupRangeCheck, PallasLookupRangeCheckConfig};
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
@@ -273,7 +273,7 @@ const MUL_SELMAP_HEADER: &str =
 ///
 /// Run with:
 /// `IRONWOOD_FIXTURE_OUT=/path/to/Zcash/Circuits/Fixtures cargo test --release \
-///   -p halo2_gadgets --lib ecc::chip::layout_dump::dump_ironwood_fixtures \
+///   -p zakura-halo2-gadgets --lib ecc::chip::layout_dump::dump_ironwood_fixtures \
 ///   -- --ignored --nocapture`
 #[test]
 #[ignore = "writes generated Ironwood fixture files"]
