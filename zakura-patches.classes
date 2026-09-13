@@ -1,0 +1,12 @@
+# Per-commit class overrides for `just map`. orig_sha_prefix<TAB>class[<TAB>note]
+# Classes: perf | dep-migration | chore. Notes are appended to the skipped list in the map header.
+16d18d2a	skipped	vendored crates.io tarballs (halo2_proofs 0.3.5, halo2_gadgets 0.5.0, halo2_poseidon 0.1.0); replaced by the upstream base
+ccbf437d	skipped	only effect on this base was a false rename-delete of the root Cargo.lock
+ff86f131	dep-migration
+174d595e	dep-migration
+7b187dbd	dep-migration
+90961682	chore
+1ffe1f0b	chore
+1378554d	chore
+9b5922b2	perf
+507f139a	perf

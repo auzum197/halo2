@@ -1,5 +1,16 @@
 # halo2
 
+## How this repository is structured
+
+- `zcash-upstream/main`: remote-tracking ref for zcash's halo2.
+- `zsa-upstream`: verbatim mirror of `zsa1` from [QED-it/halo2](https://github.com/QED-it/halo2), the ZSA source of truth, updated by running `just sync`.
+- `zakura-patches`: zakura's history filtered to the three halo2 crates.
+- `zakura-rebased`: `zakura-patches` replayed onto zcash's tip.
+- `rr-cache`: orphan branch holding recorded conflict resolutions for replayability.
+- `main`: `zakura-rebased` plus workspace root, pins, fixtures, tooling, and signatures. Built by running `just integrate`.
+
+For more info, run `just --list`
+
 ## Usage
 
 This repository contains the [halo2_proofs](https://github.com/zcash/halo2/blob/main/halo2_proofs/README.md) and
@@ -7,7 +18,7 @@ This repository contains the [halo2_proofs](https://github.com/zcash/halo2/blob/
 
 ## Minimum Supported Rust Version
 
-Requires Rust **1.88** or higher.
+Requires Rust **1.91** or higher.
 
 Minimum supported Rust version can be changed in the future, but it will be done with a
 minor version bump.

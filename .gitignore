@@ -6,3 +6,7 @@
 .vscode
 .DS_Store
 /book/book
+
+# fork regeneration scratch (see justfile)
+/zakura-patches.map
+/.regen-state
